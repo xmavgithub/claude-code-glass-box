@@ -99,7 +99,6 @@ const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'stats', label: 'Stats', hotkey: '2' },
   { id: 'instructions', label: 'Prompt', hotkey: '3' },
   { id: 'context', label: 'Context', hotkey: '4' },
-  { id: 'guide', label: 'Guide', hotkey: '5' },
 ]
 
 // The session's working directory, to show paths relative to it, and the
@@ -1926,10 +1925,11 @@ export const register: Register = on => {
       </Box>
     )
 
-    // The session's counts, with Clear beside them rather than among the tabs.
+    // The session's counts, with Guide and Clear beside them rather than
+    // among the tabs.
     const counters = (
       <Box flexDirection="row" gap={2}>
-        <Box {...fit(10)}>
+        <Box {...fit(19)}>
           <Text dimColor wrap="truncate-end">
             {[
               plural(allTurns.length, 'turn', 'turns'),
@@ -1939,6 +1939,14 @@ export const register: Register = on => {
             ].join(' · ')}
           </Text>
         </Box>
+        <Button
+          key="v:guide"
+          plain
+          dimColor={current !== 'guide'}
+          hotkey="g"
+          label="Guide"
+          onPress={() => void quietly(() => update($, view, () => (current === 'guide' ? 'timeline' : 'guide')))}
+        />
         <Button
           key="clear"
           plain
@@ -1986,7 +1994,7 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">
               Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
             </Text>
-            <Text dimColor wrap="wrap">New to this? Open the Guide (press 5 while the pane has the keyboard).</Text>
+            <Text dimColor wrap="wrap">New to this? Open the Guide (press g while the pane has the keyboard).</Text>
           </Box>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}

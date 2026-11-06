@@ -61,12 +61,13 @@ Claude Code does everything else.
 5. **Again.** With the results, Claude Code starts a new step. The turn ends
    when a step answers without asking for tools.
 
-Glass Box draws exactly this loop, live, and its **Guide** tab tells it
+Glass Box draws exactly this loop, live, and its **Guide** tells it
 with your own numbers, plus a legend and a short glossary.
 
 ## What it shows
 
-The pane has five tabs (hotkeys `1` to `5` while it has the keyboard):
+The pane has four tabs (hotkeys `1` to `4` while it has the keyboard) and,
+beside the session's counts, a **Guide** button (`g`):
 
 - **Timeline**: every turn, step, server tool and tool call, as below.
 - **Stats**: the session at a glance: calls, failures and time per tool; what
@@ -96,7 +97,8 @@ In the Timeline:
 | **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
-steps, tool calls and failures for the session, with **Clear** (`c`) beside it. Tool calls that no recorded
+steps, tool calls and failures for the session, with **Guide** (`g`) and
+**Clear** (`c`) beside it. Tool calls that no recorded
 step asked for (raised by another plugin, or made before Glass Box loaded) are
 listed at the bottom under **Other tool calls**.
 
