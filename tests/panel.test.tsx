@@ -469,7 +469,9 @@ test('on a narrow pane a long command is cut to one line, on every surface', asy
     const row = (await texts(ui)).find(t => t.startsWith('✓ Bash'))
     expect(row).toBeDefined()
     expect(row!.endsWith('…')).toBe(true)
-    expect(row!.length).toBeLessThanOrEqual(48)
+    // The terminal counts cells; the others write in a narrower proportional font.
+    expect(row!.length).toBeLessThanOrEqual(surface === 'terminal' ? 48 : Math.floor(48 * 1.6))
+    if (surface !== 'terminal') expect(row!.length).toBeGreaterThan(48)
     expect(row!.includes('\n')).toBe(false)
     await ui.unmount()
   }

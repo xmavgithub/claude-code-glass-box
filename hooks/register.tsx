@@ -783,8 +783,13 @@ export const register: Register = on => {
     /** The width a line indented by `indent` cells may take, on the terminal. */
     const fit = (indent: number) =>
       e.surface === 'terminal' ? { width: Math.max(8, columns - indent) } : {}
-    /** The cells left on a line indented by `indent`. */
-    const room = (indent: number) => Math.max(12, columns - indent)
+    // Outside the terminal the width comes in cells of the surface's code font,
+    // while the pane writes in its narrower proportional UI font: about 1.8
+    // times as many characters fit. 1.6 fills the line without risking a wrap.
+    const PROPORTIONAL = 1.6
+    const usable = e.surface === 'terminal' ? columns : Math.floor(columns * PROPORTIONAL)
+    /** The characters left on a line indented by `indent` cells. */
+    const room = (indent: number) => Math.max(12, usable - indent)
     /** One line of plain text, cut with "…" to `width` cells. */
     const cut = (text: string, width: number) => {
       const flat = text.replace(/\s+/g, ' ').trim()

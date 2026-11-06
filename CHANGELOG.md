@@ -29,7 +29,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Long lines no longer wrap over many rows on VS Code and the desktop app,
   which wrap styled text instead of truncating it: Glass Box now cuts every
-  line to the pane's width itself, ending it with "…". A long command takes
+  line to the pane's width itself (in the narrower proportional font of
+  those surfaces, about 1.6 characters per cell), ending it with "…". A long command takes
   one line; its full text is in the details of its open step.
 
 ## [0.4.0] - 2026-11-06
