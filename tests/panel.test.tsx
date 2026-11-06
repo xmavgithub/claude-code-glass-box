@@ -7,7 +7,8 @@ const PANE = {
   props: {
     title: 'Glass Box',
     isFocused: false,
-    bodyColumns: 64,
+    // Wide, so the assertions below read whole lines; a narrow pane has its own test.
+    bodyColumns: 160,
     placement: 'dock',
     scroll: { offset: 0, bodyRows: 60 },
     view: {},
@@ -454,6 +455,22 @@ test('Instructions shows the system prompt, the first message’s blocks, the to
     expect(toolsOpen).toContain('behind ToolSearch: search')
     await ui.press({ key: 'n:tools' })
     await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})
+
+test('on a narrow pane a long command is cut to one line, on every surface', async ($, on) => {
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  const command = `python3 - <<'EOF'\n${'print("a very long line of a heredoc command")\n'.repeat(12)}EOF`
+  await $.tool.call({ tool: 'Bash', command, tool_use_id: 'toolu_long' })
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 48 } })
+    const row = (await texts(ui)).find(t => t.startsWith('✓ Bash'))
+    expect(row).toBeDefined()
+    expect(row!.endsWith('…')).toBe(true)
+    expect(row!.length).toBeLessThanOrEqual(48)
+    expect(row!.includes('\n')).toBe(false)
     await ui.unmount()
   }
 })

@@ -783,6 +783,51 @@ export const register: Register = on => {
     /** The width a line indented by `indent` cells may take, on the terminal. */
     const fit = (indent: number) =>
       e.surface === 'terminal' ? { width: Math.max(8, columns - indent) } : {}
+    /** The cells left on a line indented by `indent`. */
+    const room = (indent: number) => Math.max(12, columns - indent)
+    /** One line of plain text, cut with "…" to `width` cells. */
+    const cut = (text: string, width: number) => {
+      const flat = text.replace(/\s+/g, ' ').trim()
+      return flat.length > width ? `${flat.slice(0, Math.max(0, width - 1))}…` : flat
+    }
+
+    type Part = { text: string; color?: string; dim?: boolean; bold?: boolean } | null | false | undefined
+    /**
+     * One line of styled parts, cut with "…" to `width` cells by Glass Box
+     * itself: a surface may wrap styled runs instead of truncating them, and a
+     * long command must never take ten lines. The full text is in the details.
+     */
+    const seg = (width: number, parts: Part[]) => {
+      let left = Math.max(8, width)
+      const shown: { text: string; color?: string; dim?: boolean; bold?: boolean }[] = []
+      for (const part of parts) {
+        if (!part || part.text === '' || left <= 0) continue
+        const text = part.text.replace(/[\r\n\t]+/g, ' ')
+        if (text.length > left) {
+          shown.push({ ...part, text: `${text.slice(0, Math.max(0, left - 1))}…` })
+          left = 0
+        } else {
+          shown.push({ ...part, text })
+          left -= text.length
+        }
+      }
+
+      return (
+        <Text wrap="truncate-end">
+          {shown.map(p =>
+            p.color !== undefined ? (
+              <Text color={p.color} bold={p.bold}>
+                {p.text}
+              </Text>
+            ) : (
+              <Text dimColor={p.dim} bold={p.bold}>
+                {p.text}
+              </Text>
+            ),
+          )}
+        </Text>
+      )
+    }
 
     const callById = new Map(callList.map(c => [c.id, c]))
     const verdictById = new Map(verdictList.map(v => [v.id, v]))
@@ -846,21 +891,19 @@ export const register: Register = on => {
 
       return (
         <Box key={`call-${call.id}`} paddingLeft={indent} {...fit(indent)}>
-          <Text wrap="truncate-end">
-            <Text color={status.color}>{status.icon}</Text>
-            <Text bold>{` ${name}`}</Text>
-            {server !== null && <Text dimColor>{` ·${server}`}</Text>}
-            {showAgent && call.agentId !== null && <Text color="subtle">{' [subagent]'}</Text>}
-            <Text dimColor>{`  ${formatDuration(call.durationMs)}`}</Text>
-            {outcome !== null &&
-              (outcome.color === undefined ? (
-                <Text dimColor>{`  ${outcome.label}`}</Text>
-              ) : (
-                <Text color={outcome.color}>{`  ${outcome.label}`}</Text>
-              ))}
-            {rewrite !== undefined && <Text color="suggestion">{'  rewritten'}</Text>}
-            {summary !== '' && <Text>{`  ${summary}`}</Text>}
-          </Text>
+          {seg(room(indent + 2), [
+            { text: status.icon, color: status.color },
+            { text: ` ${name}`, bold: true },
+            server !== null && { text: ` ·${server}`, dim: true },
+            showAgent && call.agentId !== null && { text: ' [subagent]', color: 'subtle' },
+            { text: `  ${formatDuration(call.durationMs)}`, dim: true },
+            outcome !== null &&
+              (outcome.color === undefined
+                ? { text: `  ${outcome.label}`, dim: true }
+                : { text: `  ${outcome.label}`, color: outcome.color }),
+            rewrite !== undefined && { text: '  rewritten', color: 'suggestion' },
+            summary !== '' && { text: `  ${summary}` },
+          ])}
         </Box>
       )
     }
@@ -928,12 +971,12 @@ export const register: Register = on => {
 
       return (
         <Box key={`server-${tool.id}`} paddingLeft={indent} {...fit(indent)}>
-          <Text wrap="truncate-end">
-            <Text color={done ? 'success' : 'warning'}>{done ? '✓' : '●'}</Text>
-            <Text bold>{` ${tool.name}`}</Text>
-            <Text dimColor>{`  ${formatDuration(tool.durationMs)}  ran by the model API`}</Text>
-            {model !== null && <Text>{`  model ${model}`}</Text>}
-          </Text>
+          {seg(room(indent + 2), [
+            { text: done ? '✓' : '●', color: done ? 'success' : 'warning' },
+            { text: ` ${tool.name}`, bold: true },
+            { text: `  ${formatDuration(tool.durationMs)}  ran by the model API`, dim: true },
+            model !== null && { text: `  model ${model}` },
+          ])}
         </Box>
       )
     }
@@ -980,19 +1023,17 @@ export const register: Register = on => {
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
             <Box {...fit(4)}>
-              <Text wrap="truncate-end">
-                <Text color={color}>{icon}</Text>
-                <Text bold>{` Step ${step.index + 1}`}</Text>
-                <Text dimColor>
-                  {` · ${model}${isRunning ? '' : `${formatDuration(step.durationMs)}${out} · `}${state}`}
-                </Text>
-              </Text>
+              {seg(room(6), [
+                { text: icon, color },
+                { text: ` Step ${step.index + 1}`, bold: true },
+                { text: ` · ${model}${isRunning ? '' : `${formatDuration(step.durationMs)}${out} · `}${state}`, dim: true },
+              ])}
             </Box>
           </Box>
           {step.answer !== '' && (
             <Box paddingLeft={2} {...fit(4)}>
               <Text dimColor italic wrap={open ? 'wrap' : 'truncate-end'}>
-                {`› ${open ? step.answer : firstLine(step.answer)}`}
+                {`› ${open ? step.answer : cut(firstLine(step.answer), room(8))}`}
               </Text>
             </Box>
           )}
@@ -1053,16 +1094,16 @@ export const register: Register = on => {
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain label={open ? '▾' : '▸'} onPress={toggle(key)} />
             <Box {...fit(2)}>
-              <Text wrap="truncate-end">
-                <Text color={color}>{icon}</Text>
-                <Text bold>{turn.agentId !== null ? ' Subagent' : ' Turn'}</Text>
-                <Text dimColor>{` · ${meta}`}</Text>
-              </Text>
+              {seg(room(2), [
+                { text: icon, color },
+                { text: turn.agentId !== null ? ' Subagent' : ' Turn', bold: true },
+                { text: ` · ${meta}`, dim: true },
+              ])}
             </Box>
           </Box>
           <Box paddingLeft={2} {...fit(2)}>
             <Text color="claude" wrap={open ? 'wrap' : 'truncate-end'}>
-              {prompt}
+              {open ? prompt : cut(prompt, room(2))}
             </Text>
           </Box>
           {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
@@ -1098,11 +1139,11 @@ export const register: Register = on => {
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
             <Box {...fit(indent + 2)}>
-              <Text wrap="truncate-end">
-                <Text color="suggestion">+</Text>
-                <Text bold>{' Added to the context'}</Text>
-                <Text dimColor>{` · ${plural(items.length, 'item', 'items')} · ${formatChars(total)} · ${split}`}</Text>
-              </Text>
+              {seg(room(indent + 2), [
+                { text: '+', color: 'suggestion' },
+                { text: ' Added to the context', bold: true },
+                { text: ` · ${plural(items.length, 'item', 'items')} · ${formatChars(total)} · ${split}`, dim: true },
+              ])}
             </Box>
           </Box>
           {open && (
@@ -1112,10 +1153,13 @@ export const register: Register = on => {
               </Text>
               {items.map(item => (
                 <Box key={`item-${item.id}`} flexDirection="column" marginTop={1}>
-                  <Text wrap="truncate-end">
-                    <Text bold>{originLabel(item)}</Text>
-                    <Text dimColor>{` · ${item.type} · ${formatChars(item.chars)} · ${formatTime(item.at)}${item.dropped ? ' · left out by a plugin' : ''}`}</Text>
-                  </Text>
+                  {seg(room(indent + 4), [
+                    { text: originLabel(item), bold: true },
+                    {
+                      text: ` · ${item.type} · ${formatChars(item.chars)} · ${formatTime(item.at)}${item.dropped ? ' · left out by a plugin' : ''}`,
+                      dim: true,
+                    },
+                  ])}
                   <Text wrap="wrap" dimColor>
                     {tidy(item.text)}
                   </Text>
@@ -1135,10 +1179,10 @@ export const register: Register = on => {
 
     const line = (key: string, label: string, value: string, labelWidth: number) => (
       <Box key={key} paddingLeft={2} {...fit(2)}>
-        <Text wrap="truncate-end">
-          <Text>{e.surface === 'terminal' ? label.padEnd(labelWidth) : label}</Text>
-          <Text dimColor>{`  ${value}`}</Text>
-        </Text>
+        {seg(room(2), [
+          { text: e.surface === 'terminal' ? label.padEnd(labelWidth) : label },
+          { text: `  ${value}`, dim: true },
+        ])}
       </Box>
     )
     const section = (title: string) => (
@@ -1361,14 +1405,14 @@ export const register: Register = on => {
     const basename = (path: string) => path.split('/').pop() ?? path
 
     /** A row with its own toggle; `body` shows under it while open. */
-    const toggleRow = (key: string, indent: number, head: JSX.Element, body: () => JSX.Element | null, byDefault = false) => {
+    const toggleRow = (key: string, indent: number, head: Part[], body: () => JSX.Element | null, byDefault = false) => {
       const open = isOpen(key, byDefault)
 
       return (
         <Box key={`row-${key}`} flexDirection="column" paddingLeft={indent}>
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Box {...fit(indent + 2)}>{head}</Box>
+            <Box {...fit(indent + 2)}>{seg(room(indent + 4), head)}</Box>
           </Box>
           {open && body()}
         </Box>
@@ -1413,20 +1457,23 @@ export const register: Register = on => {
             return toggleRow(
               `n:p:${snap.key}`,
               0,
-              <Text wrap="truncate-end">
-                <Text bold>{shortModel(snap.promptModel)}</Text>
-                <Text dimColor>{` · ${plural(snap.sections.length, 'section', 'sections')} · ${formatChars(total)} · ${formatTokens(shared)} shared, ${formatTokens(total - shared)} yours · ${extras.join(' · ')}`}</Text>
-              </Text>,
+              [
+                { text: shortModel(snap.promptModel), bold: true },
+                {
+                  text: ` · ${plural(snap.sections.length, 'section', 'sections')} · ${formatChars(total)} · ${formatTokens(shared)} shared, ${formatTokens(total - shared)} yours · ${extras.join(' · ')}`,
+                  dim: true,
+                },
+              ],
               () => (
                 <Box flexDirection="column">
                   {snap.sections.map(sec =>
                     toggleRow(
                       `n:s:${snap.key}:${sec.id}`,
                       2,
-                      <Text wrap="truncate-end">
-                        <Text>{sec.id}</Text>
-                        <Text dimColor>{` · ${sec.scope === 'shared' ? 'shared' : 'yours'} · ${formatTokens(sec.chars)} chars`}</Text>
-                      </Text>,
+                      [
+                        { text: sec.id },
+                        { text: ` · ${sec.scope === 'shared' ? 'shared' : 'yours'} · ${formatTokens(sec.chars)} chars`, dim: true },
+                      ],
                       () => textBlock(`n:st:${snap.key}:${sec.id}`, sec.text, 4),
                     ),
                   )}
@@ -1444,10 +1491,7 @@ export const register: Register = on => {
               toggleRow(
                 `n:b:${block.name}`,
                 0,
-                <Text wrap="truncate-end">
-                  <Text>{block.name}</Text>
-                  <Text dimColor>{` · ${formatChars(block.chars)}`}</Text>
-                </Text>,
+                [{ text: block.name }, { text: ` · ${formatChars(block.chars)}`, dim: true }],
                 () => textBlock(`n:bt:${block.name}`, block.text, 2),
               ),
             )}
@@ -1472,10 +1516,13 @@ export const register: Register = on => {
             toggleRow(
               'n:tools',
               0,
-              <Text wrap="truncate-end">
-                <Text>{plural(toolList.length, 'tool', 'tools')}</Text>
-                <Text dimColor>{` · ${loaded.length} loaded (${formatChars(loaded.reduce((n, t) => n + t.chars, 0))}) · ${deferred.length} behind ToolSearch`}</Text>
-              </Text>,
+              [
+                { text: plural(toolList.length, 'tool', 'tools') },
+                {
+                  text: ` · ${loaded.length} loaded (${formatChars(loaded.reduce((n, t) => n + t.chars, 0))}) · ${deferred.length} behind ToolSearch`,
+                  dim: true,
+                },
+              ],
               () => (
                 <Box flexDirection="column" paddingLeft={2}>
                   {[...byProvider.entries()]
@@ -1485,10 +1532,10 @@ export const register: Register = on => {
                       const hidden = list.filter(t => t.deferred).map(t => toolName(t.tool).name)
                       return (
                         <Box key={`n-prov-${provider}`} flexDirection="column" marginTop={1} {...fit(4)}>
-                          <Text wrap="truncate-end">
-                            <Text bold>{provider === 'engine' ? 'Claude Code' : provider}</Text>
-                            <Text dimColor>{` · ${plural(list.length, 'tool', 'tools')}`}</Text>
-                          </Text>
+                          {seg(room(6), [
+                            { text: provider === 'engine' ? 'Claude Code' : provider, bold: true },
+                            { text: ` · ${plural(list.length, 'tool', 'tools')}`, dim: true },
+                          ])}
                           {shown.length > 0 && <Text wrap="wrap">{`loaded: ${shown.join(', ')}`}</Text>}
                           {hidden.length > 0 && (
                             <Text wrap="wrap" dimColor>
@@ -1509,10 +1556,13 @@ export const register: Register = on => {
             toggleRow(
               `n:k:${load.id}`,
               0,
-              <Text wrap="truncate-end">
-                <Text bold>{load.skill}</Text>
-                <Text dimColor>{` · ${load.source}${load.plugin !== null ? ` (${load.plugin})` : ''} · ${formatChars(load.chars)} · ${formatTime(load.at)}`}</Text>
-              </Text>,
+              [
+                { text: load.skill, bold: true },
+                {
+                  text: ` · ${load.source}${load.plugin !== null ? ` (${load.plugin})` : ''} · ${formatChars(load.chars)} · ${formatTime(load.at)}`,
+                  dim: true,
+                },
+              ],
               () => (
                 <Box flexDirection="column">
                   {load.path !== null && para(`n-kp-${load.id}`, tidy(load.path), true)}
@@ -1600,10 +1650,10 @@ export const register: Register = on => {
             <Box flexDirection="row" gap={1}>
               <Button key="o:others" plain dimColor label={othersOpen ? '▾' : '▸'} onPress={toggle('o:others')} />
               <Box {...fit(2)}>
-                <Text wrap="truncate-end">
-                  <Text bold>Other tool calls</Text>
-                  <Text dimColor>{' · not tied to a recorded step'}</Text>
-                </Text>
+                {seg(room(2), [
+                  { text: 'Other tool calls', bold: true },
+                  { text: ' · not tied to a recorded step', dim: true },
+                ])}
               </Box>
             </Box>
             {orphans.map(call => (
