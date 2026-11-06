@@ -166,10 +166,11 @@ not installed.
 
 ## Limitations
 
-- Thinking is shown as Claude Code receives it while the step streams: it
-  may be a summary of the model's reasoning, and a step may think without
-  any text of it being sent. When none came, Glass Box cannot tell whether the
-  model did not think or its thinking was left out, and says so.
+- Thinking is shown as Claude Code receives it: it may be a summary of the
+  model's reasoning. Some models think without sending any text of it; once
+  the step is over Glass Box reads the transcript and says whether the model
+  thought with no text sent, its thinking came back redacted, or it did not
+  think. A step it cannot match in the transcript says it cannot tell.
 - Server-side tools such as the advisor run inside the model request: Glass Box
   shows their input and result as the transcript keeps them, read back once
   the step is over, but not how they worked inside. The advisor's model is the

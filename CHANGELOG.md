@@ -80,10 +80,12 @@ everything below is on `main`. 1.0 will be released when the criteria in
   open while it works (`agent.spawn`). A subagent's turn whose call Glass Box
   did not record stays at the top level and says why.
 - **Thinking**: under each step, `∴` and the first line of the model's
-  thinking; open, all of it as it streamed (up to 3,000 characters, with the
-  total), live while the step runs. It is said that it may be a summary, and
-  a step with no thinking says Glass Box cannot tell whether the model did
-  not think or its thinking was not sent (`turn.step` thinking chunks).
+  thinking; open, all of it (up to 3,000 characters, with the total), live
+  while the step runs, with the note that it may be a summary (`turn.step`
+  thinking chunks). When no text of it came, the transcript read back once
+  the step is over tells which: the model thought with no text sent, its
+  thinking came back redacted, or it did not think; text the stream did not
+  carry is taken from the transcript (`$.session.messages`).
 - **Turns you did not type** are named by what started them: "Report from
   subagent Explore" when a background agent hands its final report to the
   main loop, "Message from another agent", "Background task ended". The

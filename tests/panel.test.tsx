@@ -719,45 +719,64 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
   await last.unmount()
 })
 
-test('a step shows the thinking it streamed, and says so when none came', async ($, on) => {
+test('a step shows its thinking, and what the transcript says when no text of it came', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 500) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
   const long = 'x'.repeat(5000)
   on('turn.step', async function* (_, e) {
-    if (e.index === 0) {
+    if (e.turnId === 'T1' && e.index === 0) {
       yield { kind: 'thinking', index: 0, text: 'I should list the files first.' } as const
       yield { kind: 'thinking', index: 0, text: '\nThen read the README.' } as const
       yield { kind: 'text', index: 1, text: 'Listing.' } as const
     }
-    if (e.index === 1) yield { kind: 'thinking', index: 0, text: long } as const
-    return { turnId: e.turnId, index: e.index, answer: e.index === 2 ? 'Done.' : '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+    if (e.turnId === 'T1' && e.index === 1) yield { kind: 'thinking', index: 0, text: long } as const
+    return { turnId: e.turnId, index: e.index, answer: 'Done.', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
   })
+  // The model's last message as the transcript keeps it, set per turn below.
+  let lastBlocks: { type: string; [field: string]: unknown }[] = []
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', content: lastBlocks },
+    ],
+  }))
 
-  await $.turn.start({ turnId: 'T1', text: 'go' })
-  for (const index of [0, 1, 2]) {
-    const step = $.turn.step({ turnId: 'T1', index, model: 'claude-opus-5-5', messageCount: 1 })
-    for await (const _chunk of step) {
-      // drain
+  const run = async (turnId: string, steps: number, blocks: typeof lastBlocks) => {
+    lastBlocks = blocks
+    await $.turn.start({ turnId, text: 'go' })
+    for (let index = 0; index < steps; index++) {
+      const step = $.turn.step({ turnId, index, model: 'claude-opus-5-5', messageCount: 1 })
+      for await (const _chunk of step) {
+        // drain
+      }
     }
+    await $.turn.complete({ turnId, reason: 'answer', answer: 'Done.', durationMs: 1000, isAborted: false } as never)
   }
+  // T1: two steps stream their thinking; the third thought with no text sent.
+  await run('T1', 3, [{ type: 'thinking', thinking: '', signature: 'sig' }, { type: 'text', text: 'Done.' }])
+  await run('T2', 1, [{ type: 'text', text: 'Done.' }])
+  await run('T3', 1, [{ type: 'redacted_thinking', data: 'abc' }, { type: 'text', text: 'Done.' }])
+  await run('T4', 1, [{ type: 'thinking', thinking: 'Recovered from the transcript.', signature: 'sig' }, { type: 'text', text: 'Done.' }])
 
+  const keys = ['t:T1', 't:T2', 't:T3', 's:T1:0', 's:T1:1', 's:T1:2', 's:T2:0', 's:T3:0', 's:T4:0']
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    const closed = await texts(ui)
-    expect(closed).toContain('∴ I should list the files first.')
-    expect(has(closed, /^∴ x+…$/)).toBe(true)
-
-    await ui.press({ key: 's:T1:0' })
-    await ui.press({ key: 's:T1:1' })
-    await ui.press({ key: 's:T1:2' })
-    const open = await texts(ui)
-    expect(open).toContain('thinking · 52 chars as streamed')
-    expect(open).toContain('I should list the files first.\nThen read the README.')
-    expect(open).toContain('thinking · 5.0k chars as streamed')
-    expect(open).toContain(`${'x'.repeat(3000)}…`)
-    expect(has(open, /^No thinking was streamed in this step/)).toBe(true)
-    for (const key of ['s:T1:0', 's:T1:1', 's:T1:2']) await ui.press({ key })
+    // T4 is the newest, open by default: the text read back shows closed.
+    expect(await texts(ui)).toContain('∴ Recovered from the transcript.')
+    for (const key of keys) await ui.press({ key })
+    const all = await texts(ui)
+    expect(all).toContain('∴ Recovered from the transcript.'.slice(2))
+    expect(all).toContain('thinking · 52 chars')
+    expect(all).toContain('I should list the files first.\nThen read the README.')
+    expect(all).toContain('thinking · 5.0k chars')
+    expect(all).toContain(`${'x'.repeat(3000)}…`)
+    expect(has(all, /^The model thought in this step, but the text of its thinking was not sent/)).toBe(true)
+    expect(all).toContain('No thinking in this step: the transcript has none.')
+    expect(has(all, /^The model thought in this step, but its thinking came back redacted/)).toBe(true)
+    // Closed again, steps before their turns.
+    for (const key of [...keys].reverse()) await ui.press({ key })
     await ui.unmount()
   }
 })

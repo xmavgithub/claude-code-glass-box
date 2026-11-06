@@ -239,6 +239,12 @@ export type Step = {
   thinking: string
   /** How many characters of thinking streamed in all. */
   thinkingChars: number
+  /**
+   * What the transcript keeps of the step's thinking, read once the step is
+   * over: `text`; `omitted`, signed blocks with no text; `redacted`; `none`;
+   * null while unread, or when the step could not be told in the transcript.
+   */
+  thinkingSeen: 'text' | 'omitted' | 'redacted' | 'none' | null
 }
 
 /**

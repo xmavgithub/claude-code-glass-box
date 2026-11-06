@@ -52,7 +52,7 @@ const THINKING_EVERY_MS = 1000
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
 const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-3' })
-const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-3' })
+const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-4' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
   shape: 'verdicts-1',
@@ -292,6 +292,16 @@ function originOf(text: string): { from: TurnFrom; body: string } | null {
   return null
 }
 
+/** What a step's open details say of its thinking when no text of it came. */
+const THINKING_SEEN: Record<string, string> = {
+  omitted:
+    'The model thought in this step, but the text of its thinking was not sent: the transcript keeps its thinking signed and empty, so there is nothing to show.',
+  redacted: 'The model thought in this step, but its thinking came back redacted (encrypted by the API): it cannot be read.',
+  none: 'No thinking in this step: the transcript has none.',
+  unread:
+    'No thinking came while the step streamed. Whether the model thought is read from the transcript when the next step or the turn ends; until then Glass Box cannot tell.',
+}
+
 const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string | null }> = {
   answer: { icon: '✓', color: 'success', label: null },
   aborted: { icon: '⊘', color: 'warning', label: 'interrupted' },
@@ -464,22 +474,66 @@ function collect(value: unknown, key: string, out: string[] = [], depth = 0): st
 }
 
 /**
+ * What the transcript keeps of a step's thinking: its last model message,
+ * when its tool calls show it is this step's, holds the thinking blocks as
+ * they go back to the API, signed even when their text was not sent.
+ */
+async function readThinking(
+  $: EngineInterface,
+  step: Step,
+  messages: readonly { role: string; content: readonly { type: string; [field: string]: unknown }[] }[],
+) {
+  const message = [...messages].reverse().find(m => m.role === 'assistant')
+  if (message === undefined) return
+  const blocks = message.content
+  const calls = new Set(blocks.filter(b => b.type === 'tool_use').map(b => b['id']))
+  // The last model message is this step's when it asked for the same calls.
+  const isThisStep = step.toolIds.length > 0 ? step.toolIds.every(id => calls.has(id)) : calls.size === 0
+  if (!isThisStep) return
+
+  const texts = blocks
+    .filter(b => b.type === 'thinking')
+    .map(b => (typeof b['thinking'] === 'string' ? b['thinking'] : ''))
+  const redacted = blocks.some(b => b.type === 'redacted_thinking')
+  const text = texts.join('\n').trim()
+  const seen: Step['thinkingSeen'] =
+    text !== '' ? 'text' : texts.length > 0 ? 'omitted' : redacted ? 'redacted' : 'none'
+
+  await patchStep($, step.key, s => ({
+    ...s,
+    thinkingSeen: seen,
+    // Text the stream did not carry, the transcript may still hold.
+    ...(s.thinking === '' && text !== ''
+      ? {
+          thought: true,
+          thinking: text.length > MAX_THINKING ? `${text.slice(0, MAX_THINKING)}…` : text,
+          thinkingChars: text.length,
+        }
+      : {}),
+  }))
+}
+
+/**
  * Server tools run inside the model request: their result is in the
  * transcript, not in the step's result. Read it back from the conversation,
  * in its API form, for every server tool of this loop still without one.
  */
 async function fillServerResults($: EngineInterface, agentId: string | null) {
   const list = await read($, steps)
-  const pending = new Set(
-    list
-      .filter(s => s.agentId === agentId)
-      .flatMap(s => s.serverTools.filter(t => t.output === null).map(t => t.id)),
-  )
-  if (pending.size === 0) return
+  const loop = list.filter(s => s.agentId === agentId)
+  const pending = new Set(loop.flatMap(s => s.serverTools.filter(t => t.output === null).map(t => t.id)))
+  // The loop's last finished step (a new one may already be running), if
+  // what it thought is still unread.
+  const last = loop
+    .filter(s => s.durationMs !== null && s.stopReason !== null)
+    .reduce<Step | undefined>((a, s) => (a === undefined || s.startedAt >= a.startedAt ? s : a), undefined)
+  const unread = last?.thinkingSeen === null ? last : undefined
+  if (pending.size === 0 && unread === undefined) return
 
   const answer = await $.session.messages(agentId === null ? { as: 'api' } : { as: 'api', agentId })
   if (!Array.isArray(answer)) return // a hook refused the read
   const messages = answer
+  if (unread !== undefined) await readThinking($, unread, messages)
   const found = new Map<string, { output: string; model: string | null }>()
   for (const message of messages) {
     for (const block of message.content) {
@@ -493,7 +547,7 @@ async function fillServerResults($: EngineInterface, agentId: string | null) {
       })
     }
   }
-  if (found.size === 0) return
+  if (pending.size === 0 || found.size === 0) return
 
   await update($, steps, all =>
     all.map(step =>
@@ -643,8 +697,9 @@ export const register: Register = on => {
   // chunks carry the tool_use_ids that tie the step to its tool calls.
   on('turn.step', async function* ($, e, next) {
     const key = `${e.turnId}:${e.index}`
-    // The previous step's server tools are in the transcript by now.
-    await quietly(() => fillServerResults($, e.agentId ?? null))
+    // The previous step's server tools and thinking are in the transcript by
+    // now. Read without waiting: the request to the model goes out at once.
+    void quietly(() => fillServerResults($, e.agentId ?? null))
     const startedAt = await now($)
     const step: Step = {
       key,
@@ -664,6 +719,7 @@ export const register: Register = on => {
       thought: false,
       thinking: '',
       thinkingChars: 0,
+      thinkingSeen: null,
     }
     await quietly(() =>
       update($, steps, list => [...list.filter(s => s.key !== key), step].slice(-MAX_STEPS)),
@@ -714,6 +770,8 @@ export const register: Register = on => {
           thought,
           thinking: shownThinking(),
           thinkingChars,
+          // Streamed text needs no reading back from the transcript.
+          ...(thinking !== '' ? { thinkingSeen: 'text' as const } : {}),
           ...(done === undefined
             ? { stopReason: null }
             : {
@@ -1461,21 +1519,21 @@ export const register: Register = on => {
               ])}
             </Box>
           </Box>
-          {step.thought && !open && (
+          {step.thinking !== '' && !open && (
             <Box paddingLeft={2} {...fit(4)}>
               <Text dimColor italic wrap="truncate-end">
-                {`∴ ${step.thinking === '' ? '(thought, with no text sent)' : cut(firstLine(step.thinking), room(8))}`}
+                {`∴ ${cut(firstLine(step.thinking), room(8))}`}
               </Text>
             </Box>
           )}
-          {step.thought && open && (
+          {step.thinking !== '' && open && (
             <Box flexDirection="column" paddingLeft={2} {...fit(4)}>
-              <Text color="suggestion">{`thinking · ${formatTokens(step.thinkingChars)} chars as streamed${isRunning ? ' so far' : ''}`}</Text>
+              <Text color="suggestion">{`thinking · ${formatTokens(step.thinkingChars)} chars${isRunning ? ' so far' : ''}`}</Text>
               <Text dimColor wrap="wrap">
                 What the model wrote while thinking, before answering, as Claude Code received it. It may be a summary of the model’s reasoning rather than all of it.
               </Text>
               <Text dimColor italic wrap="wrap">
-                {step.thinking === '' ? '(the model thought, but no text of its thinking was sent: it can be left out or redacted)' : step.thinking}
+                {step.thinking}
               </Text>
             </Box>
           )}
@@ -1496,9 +1554,9 @@ export const register: Register = on => {
                   {`tokens: ${formatTokens(contextTokens(step.usage))} context (${formatTokens(step.usage.cacheRead)} cached, ${formatTokens(step.usage.cacheWrite)} written, ${formatTokens(step.usage.input)} new) · ${formatTokens(step.usage.output)} output`}
                 </Text>
               )}
-              {!step.thought && !isRunning && (
+              {step.thinking === '' && !isRunning && (
                 <Text dimColor wrap="wrap">
-                  No thinking was streamed in this step: the model did not think, or its thinking was not sent. Glass Box cannot tell which.
+                  {THINKING_SEEN[step.thinkingSeen ?? (step.thought ? 'omitted' : 'unread')] ?? THINKING_SEEN['unread']}
                 </Text>
               )}
             </Box>
