@@ -146,6 +146,29 @@ export type Letter = {
   rewritten: boolean
 }
 
+/** A slash command that ran, or a `/config` row that changed. */
+export type Action = {
+  id: string
+  at: number
+  type: 'command' | 'config'
+  /** The command without its slash, or the setting's key. */
+  name: string
+  /** The command's arguments, or the setting's new value, as text. */
+  value: string
+  /** The setting's value before; null for a command. */
+  previous: string | null
+  /** Who did it: the origin's kind (composer: you; plugin…). */
+  by: string
+  /** The plugin, when one did it. */
+  plugin: string | null
+  /** What the command printed, clipped. */
+  output: string
+  /** What the command left for the model to read, never shown to you; clipped. */
+  notes: string
+  /** Why a setting change was refused; null when it went through. */
+  denied: string | null
+}
+
 /** An agent type offered to the model, as `agent.offer` raised it. */
 export type OfferedAgent = {
   agent: string
@@ -440,6 +463,7 @@ declare module 'claude-code' {
       mods: Shaped<ModInfo[]>
       mail: Shaped<Letter[]>
       agentTypes: Shaped<OfferedAgent[]>
+      actions: Shaped<Action[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

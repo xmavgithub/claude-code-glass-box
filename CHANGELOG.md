@@ -28,15 +28,17 @@ everything below is on `main`. 1.0 will be released when the criteria in
   tokens, peak context and cache share, stop reasons, models.
 - **Prompt**: what the model is told before it reads the conversation. The
   system prompt section by section, shared or yours, with size and text
-  (`prompt.compose`); the blocks in front of the first message and the
-  CLAUDE.md files behind them, with their kind and imports (`prompt.context`);
-  the tools offered, loaded in full or behind ToolSearch, by provider
-  (`tool.describe`); the agent types the model can start, with when to use
-  each and any a plugin kept from it (`agent.offer`); the plugins in the loop:
-  mods with their tier, provenance and what they hook and call on `$`
-  (`plugin.register`), other plugins by the tools, agent types, skills and
-  permission checks they provide, with the limit said (a mod loaded before
-  Glass Box shows only by what it does); the skills loaded (`skill.prompt`).
+  (`prompt.compose`), one per kind of request, each saying what it was for:
+  sent to the model, or measured only as /context does; the blocks in front of
+  the first message and the CLAUDE.md files behind them, with their kind and
+  imports (`prompt.context`); the tools offered, loaded in full or behind
+  ToolSearch, by provider (`tool.describe`); the agent types the model can
+  start, with when to use each and any a plugin kept from it (`agent.offer`);
+  the plugins in the loop: mods with their tier, provenance and what they hook
+  and call on `$` (`plugin.register`), other plugins by the tools, agent
+  types, skills and permission checks they provide, with the limit said (a mod
+  loaded before Glass Box shows only by what it does); the skills loaded
+  (`skill.prompt`).
 - **Context**: how full the context window is and what fills it, as
   /context counts it (system prompt, tools, memory files, MCP servers,
   messages, free space, the auto-compaction threshold), with a Refresh
@@ -91,6 +93,10 @@ everything below is on `main`. 1.0 will be released when the criteria in
   the step is over tells which: the model thought with no text sent, its
   thinking came back redacted, or it did not think; text the stream did not
   carry is taken from the transcript (`$.session.messages`).
+- **Slash commands and settings** as rows of their own among the turns: the
+  command as typed, who ran it, what it printed and the notes it left for
+  the model to read (`command.run`); each `/config` change with its value
+  before and after, who made it, or why a plugin refused it (`config.set`).
 - **Messages between agents**: under the turn of the loop that sent or
   received them, every message an agent sent (SendMessage, a plugin's) and
   every one that arrived (a teammate's, another session's, a relay's, an

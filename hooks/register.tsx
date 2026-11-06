@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
 import type {
+  Action,
   Breakdown,
   CallStatus,
   Change,
@@ -102,6 +103,9 @@ const MAX_MODS = 50
 const agentTypes = atom({ plugin: 'glass-box', key: 'agentTypes' } as const, [], { shape: 'agentTypes-1' })
 const MAX_AGENT_TYPES = 100
 const agentTypeSeen = new Map<string, string>()
+// The slash commands that ran and the settings that changed.
+const actions = atom({ plugin: 'glass-box', key: 'actions' } as const, [], { shape: 'actions-1' })
+const MAX_ACTIONS = 100
 // Messages between agents and sessions, sent and received.
 const mail = atom({ plugin: 'glass-box', key: 'mail' } as const, [], { shape: 'mail-1' })
 const MAX_MAIL = 100
@@ -1185,6 +1189,56 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // A slash command, the way it was typed, and what it printed and left for
+  // the model to read.
+  on('command.run', async ($, e, next) => {
+    const at = await now($)
+    const answer = await next(e)
+    await quietly(() => {
+      const record: Action = {
+        id: `${at}-${injectionSeq++}`,
+        at,
+        type: 'command',
+        name: e.command,
+        value: e.args,
+        previous: null,
+        by: e.origin.kind,
+        plugin: e.origin.kind === 'plugin' ? e.origin.name : null,
+        output: clip(answer.text ?? '', MAX_OUTPUT),
+        notes: clip((answer.context ?? []).join('\n\n'), MAX_INJECTION_TEXT),
+        denied: null,
+      }
+      return update($, actions, list => [...list, record].slice(-MAX_ACTIONS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // A /config row changing, from the menu or a plugin, and whether it did.
+  on('config.set', async ($, e, next) => {
+    const at = await now($)
+    const answer = await next(e)
+    await quietly(() => {
+      const text = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
+      const record: Action = {
+        id: `${at}-${injectionSeq++}`,
+        at,
+        type: 'config',
+        name: e.key,
+        value: clip(text(answer.deny === undefined ? answer.value : e.value), MAX_CHANGE),
+        previous: clip(text(e.previous), MAX_CHANGE),
+        by: e.origin.kind,
+        plugin: 'name' in e.origin && typeof e.origin.name === 'string' ? e.origin.name : null,
+        output: '',
+        notes: '',
+        denied: answer.deny ?? null,
+      }
+      return update($, actions, list => [...list, record].slice(-MAX_ACTIONS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // Each agent type offered to the model, in its listing or at dispatch; a
   // plugin may keep one from it. Raised on every request: written on change.
   on('agent.offer', async ($, e, next) => {
@@ -1294,7 +1348,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList, actionList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1308,6 +1362,7 @@ export const register: Register = on => {
         read($, mods),
         read($, mail),
         read($, agentTypes),
+        read($, actions),
       ])
 
     const columns = e.props.bodyColumns
@@ -1978,6 +2033,67 @@ export const register: Register = on => {
       )
     }
 
+    // A slash command or a setting change: a row of its own among the turns.
+    const actionBy = (a: Action) =>
+      a.by === 'composer'
+        ? 'by you'
+        : a.plugin !== null
+          ? `by plugin ${a.plugin}`
+          : `from ${ORIGIN[a.by]?.who ?? a.by}`
+
+    const actionRow = (a: Action) => {
+      if (a.type === 'config') {
+        return (
+          <Box key={`action-${a.id}`} flexDirection="column" paddingLeft={2} marginTop={1} {...fit(2)}>
+            {seg(room(2), [
+              { text: '⚙', color: a.denied !== null ? 'warning' : 'suggestion' },
+              { text: ` Setting ${a.name}`, bold: true },
+              { text: ` · ${a.previous ?? ''} → ${a.value}` },
+              { text: ` · ${formatTime(a.at).slice(0, 5)} · ${actionBy(a)}`, dim: true },
+              a.denied !== null && { text: ' · refused', color: 'warning' },
+            ])}
+            {a.denied !== null && (
+              <Text color="warning" wrap="wrap">
+                {`A plugin refused the change: ${a.denied}`}
+              </Text>
+            )}
+          </Box>
+        )
+      }
+
+      return (
+        <Box key={`action-${a.id}`} flexDirection="column" marginTop={1}>
+          {toggleRow(
+            `c:${a.id}`,
+            0,
+            [
+              { text: '/', color: 'suggestion' },
+              { text: ` /${a.name}${a.value !== '' ? ` ${a.value}` : ''}`, bold: true },
+              { text: ` · ${formatTime(a.at).slice(0, 5)} · ${actionBy(a)}`, dim: true },
+              a.notes !== '' && { text: ' · left notes for the model', color: 'suggestion' },
+            ],
+            () => (
+              <Box flexDirection="column" paddingLeft={2} {...fit(2)}>
+                <Text dimColor wrap="wrap">
+                  A slash command, run by Claude Code itself. One that hands the model a prompt (a skill, say) starts a turn of its own.
+                </Text>
+                <Text color="suggestion">output</Text>
+                <Text wrap="wrap" dimColor={a.output === ''}>
+                  {a.output === '' ? '(printed nothing)' : tidy(a.output)}
+                </Text>
+                {a.notes !== '' && <Text color="suggestion">left for the model to read, not shown to you</Text>}
+                {a.notes !== '' && (
+                  <Text wrap="wrap" dimColor>
+                    {tidy(a.notes)}
+                  </Text>
+                )}
+              </Box>
+            ),
+          )}
+        </Box>
+      )
+    }
+
     // What Claude Code added to the model's reading for a turn: one line that
     // opens on each item, with who wrote it and its text.
     const originLabel = (item: Injection) =>
@@ -2580,7 +2696,7 @@ export const register: Register = on => {
             ].filter(part => part !== null)
 
             return toggleRow(
-              `n:p:${name}`,
+              `n:pl:${name}`,
               0,
               [{ text: name, bold: true }, parts.length > 0 && { text: ` · ${parts.join(' · ')}`, dim: true }],
               () => (
@@ -2630,13 +2746,23 @@ export const register: Register = on => {
           {section('System prompt')}
           {para('n-sp', 'The standing instructions Claude Code sends with every request, before the conversation. Shared sections read the same for everyone and are cached across users; session sections are built for you: your environment, your settings, your tools.', true)}
           {latestFirst.length === 0 && para('n-sp-none', 'Not recorded yet: it is composed when Claude Code next calls the model.', true)}
-          {latestFirst.map((snap, i) => {
+          {latestFirst.length > 1 &&
+            para('n-sp-kinds', 'Claude Code composes one system prompt per kind of request, so more than one is listed: each says what it was for, and its traits tell how it was built.', true)}
+          {[...latestFirst]
+            // The prompts sent to the model first; a measurement after.
+            .sort((a, b) => Number(a.traits.includes('analysis')) - Number(b.traits.includes('analysis')))
+            .map((snap, i) => {
             const total = snap.sections.reduce((n, s) => n + s.chars, 0)
             const shared = snap.sections.filter(s => s.scope === 'shared').reduce((n, s) => n + s.chars, 0)
+            const purpose = snap.traits.includes('analysis')
+              ? 'measured only, as /context does: not sent'
+              : snap.traits.includes('teammate')
+                ? 'a teammate’s, sent to the model'
+                : 'sent to the model'
             const extras = [
               `${snap.toolCount} tools offered`,
               snap.outputStyle !== 'default' ? `output style ${snap.outputStyle}` : null,
-              snap.traits.length > 0 ? snap.traits.join(', ') : null,
+              snap.traits.length > 0 ? `traits: ${snap.traits.join(', ')}` : null,
               `updated ${formatTime(snap.at)}`,
             ].filter(part => part !== null)
 
@@ -2645,6 +2771,7 @@ export const register: Register = on => {
               0,
               [
                 { text: shortModel(snap.promptModel), bold: true },
+                { text: ` · ${purpose}`, color: snap.traits.includes('analysis') ? undefined : 'suggestion', dim: snap.traits.includes('analysis') },
                 {
                   text: ` · ${plural(snap.sections.length, 'section', 'sections')} · ${formatChars(total)} · ${formatTokens(shared)} shared, ${formatTokens(total - shared)} yours · ${extras.join(' · ')}`,
                   dim: true,
@@ -2851,6 +2978,7 @@ export const register: Register = on => {
               await update($, agents, () => [])
               await update($, messages, () => [])
               await update($, mail, () => [])
+              await update($, actions, () => [])
               await update($, toggled, () => [])
             })
           }
@@ -2877,7 +3005,7 @@ export const register: Register = on => {
     function renderTimeline() {
       return (
         <Box flexDirection="column">
-        {allTurns.length === 0 && orphans.length === 0 && (
+        {allTurns.length === 0 && orphans.length === 0 && actionList.length === 0 && (
           <Box flexDirection="column" {...fit(0)}>
             <Text dimColor wrap="wrap">
               Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
@@ -2885,7 +3013,14 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">New to this? Open the Guide (press g while the pane has the keyboard).</Text>
           </Box>
         )}
-        {topTurns.map((turn, i) => renderTurn(turn, i === 0))}
+        {[
+          ...topTurns.map(turn => ({ at: turn.startedAt, turn, action: null })),
+          ...actionList.map(action => ({ at: action.at, turn: null, action })),
+        ]
+          .sort((a, b) => b.at - a.at)
+          .map(row =>
+            row.turn !== null ? renderTurn(row.turn, row.turn.id === topTurns[0]?.id) : row.action !== null ? actionRow(row.action) : null,
+          )}
         {orphans.length > 0 && (
           <Box key="orphans" flexDirection="column" marginTop={1}>
             <Box flexDirection="row" gap={1}>

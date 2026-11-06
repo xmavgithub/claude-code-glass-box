@@ -420,6 +420,15 @@ test('Instructions shows the system prompt, the first message’s blocks, the to
     outputStyle: { name: 'default', isKeepingCodingInstructions: true },
     traits: [],
   } as never)
+  // A render that only measures the prompt (as /context does) is told apart.
+  await $.prompt.compose({
+    model: 'claude-opus-5-5',
+    promptModel: 'claude-opus-5-5',
+    surfaces: ['terminal'],
+    tools: ['Bash', 'Read', 'WebFetch'],
+    outputStyle: { name: 'default', isKeepingCodingInstructions: true },
+    traits: ['analysis'],
+  } as never)
   await $.prompt.context({
     blocks: [{ name: 'claudeMd', text: 'Always answer in Italian.' }, { name: 'currentDate', text: '2026-11-06' }],
     instructionFiles: [
@@ -437,7 +446,11 @@ test('Instructions shows the system prompt, the first message’s blocks, the to
     await ui.press({ key: 'v:instructions' })
     const all = await texts(ui)
 
-    expect(has(all, /^opus-5-5 · 2 sections · 53 chars \(~13 tokens\) · 20 shared, 33 yours · 3 tools offered · updated/)).toBe(true)
+    expect(has(all, /^opus-5-5 · sent to the model · 2 sections · 53 chars \(~13 tokens\) · 20 shared, 33 yours · 3 tools offered · updated/)).toBe(true)
+    // The prompt sent to the model comes first, the measurement after.
+    const prompts = all.filter(t => /^opus-5-5 · /.test(t))
+    expect(prompts.length).toBe(2)
+    expect(prompts[1]).toMatch(/^opus-5-5 · measured only, as \/context does: not sent · .* · traits: analysis · /)
     expect(has(all, /^intro · shared · 20 chars$/)).toBe(true)
     expect(has(all, /^claudeMd · 25 chars/)).toBe(true)
     expect(has(all, /^user *  3 chars · ~\/\.claude\/RTK\.md · imported by CLAUDE\.md$/)).toBe(true)
@@ -849,9 +862,9 @@ test('the Prompt tab lists the plugins seen at work, and not plain MCP servers',
     // A plain MCP server is listed with the tools, not as a plugin.
     expect(has(all, /^gmail · /)).toBe(false)
 
-    await ui.press({ key: 'n:p:plugin-authoring' })
+    await ui.press({ key: 'n:pl:plugin-authoring' })
     expect(await texts(ui)).toContain('Tools: scan_secrets.')
-    await ui.press({ key: 'n:p:plugin-authoring' })
+    await ui.press({ key: 'n:pl:plugin-authoring' })
     await ui.press({ key: 'v:timeline' })
     await ui.unmount()
   }
@@ -923,6 +936,42 @@ test('the Prompt tab lists the agent types offered to the model, and one a plugi
     expect(await texts(ui)).toContain('Fast read-only search across a codebase.')
     await ui.press({ key: 'n:a:Explore' })
     await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})
+
+test('slash commands and setting changes are rows of their own among the turns', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('command.run', (_, e) =>
+    e.command === 'compact' ? { text: 'Compacted.', context: ['The conversation was summarized above.'] } : { text: '' },
+  )
+  on('config.set', (_, e) => (e.key === 'theme' ? { deny: 'locked by policy' } : { value: e.value }))
+
+  await $.turn.start({ turnId: 'T1', text: 'hello' })
+  await $.command.run({ command: 'compact', args: 'keep the plan', origin: { kind: 'composer' }, presentation: 'local' } as never)
+  await $.config.set({ key: 'model', value: 'sonnet', previous: 'opus', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } } as never)
+  await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'plugin', name: 'styler' } } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const all = await texts(ui)
+    expect(has(all, /^\/ \/compact keep the plan · \d\d:\d\d · by you · left notes for the model$/)).toBe(true)
+    expect(has(all, /^⚙ Setting model · opus → sonnet · \d\d:\d\d · by you$/)).toBe(true)
+    expect(has(all, /^⚙ Setting theme · dark → light · \d\d:\d\d · by plugin styler · refused$/)).toBe(true)
+    expect(all).toContain('A plugin refused the change: locked by policy')
+    // Newest first: the settings, the command, then the turn.
+    const order = all.filter(t => /^(⚙ Setting|\/ \/|● Turn)/.test(t)).map(t => t.split(' ')[0])
+    expect(order).toEqual(['⚙', '⚙', '/', '●'])
+
+    const key = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key ?? '').find(k => k.startsWith('c:'))
+    expect(key).toBeDefined()
+    await ui.press({ key: key ?? '' })
+    const open = await texts(ui)
+    expect(open).toContain('Compacted.')
+    expect(open).toContain('The conversation was summarized above.')
+    await ui.press({ key: key ?? '' })
     await ui.unmount()
   }
 })

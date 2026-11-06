@@ -119,7 +119,7 @@ operations on `$`) against what Glass Box records. In order of value:
   `session.receive`).
 - [x] **Agents on offer.** The agent types the model is offered, beside the
   tools in the Prompt tab (`agent.offer`).
-- [ ] **Commands and settings.** The slash commands you run and the
+- [x] **Commands and settings.** The slash commands you run and the
   `/config` rows that change, as Timeline rows (`command.run`, `config.set`).
 - [ ] **Telemetry.** What Claude Code logs and where it sends it, kept in the
   pane only (`telemetry.log`, `telemetry.mark`).
