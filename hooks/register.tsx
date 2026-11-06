@@ -14,6 +14,7 @@ import type {
   Rewrite,
   SkillLoad,
   ServerTool,
+  Spawn,
   Step,
   ToolCall,
   Turn,
@@ -42,6 +43,7 @@ const MAX_SECTION_TEXT = 3000
 const MAX_SKILLS = 50
 const MAX_SKILL_TEXT = 3000
 const MAX_TOOLS = 400
+const MAX_SPAWN_PROMPT = 3000
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
@@ -79,6 +81,9 @@ const compactions = atom({ plugin: 'glass-box', key: 'compactions' } as const, [
 })
 
 const MAX_COMPACTIONS = 50
+// The subagents started, each tied to the call that started it.
+const agents = atom({ plugin: 'glass-box', key: 'agents' } as const, [], { shape: 'agents-1' })
+const MAX_AGENTS = 100
 // The /context-style breakdown is estimated locally: at most this often.
 const BREAKDOWN_EVERY_MS = 30_000
 let lastBreakdownAt = 0
@@ -550,6 +555,41 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // A subagent starting: tied to the Agent call that started it by the call's
+  // tool_use_id, and to its own turns by the agentId the engine answers.
+  on('agent.spawn', async ($, e, next) => {
+    // Taken before the agent starts, so it comes before the agent's turns.
+    const at = await now($)
+    const answer = await next(e)
+    await quietly(async () => {
+      const refused = answer.deny !== undefined
+      const record: Spawn = {
+        toolUseId: e.tool_use_id,
+        agentId: refused ? null : (answer.agentId ?? e.resume?.agentId ?? null),
+        parentAgentId: e.parentAgentId ?? null,
+        at,
+        type: e.subagentType,
+        description: e.description,
+        prompt: clip(e.prompt, MAX_SPAWN_PROMPT),
+        promptChars: e.prompt.length,
+        requested: e.model ?? null,
+        model: refused ? null : answer.model,
+        parentModel: e.parentModel,
+        permissionMode: e.permissionMode ?? null,
+        background: e.background,
+        fork: e.fork,
+        teammate: e.isTeammate === true,
+        name: e.name ?? null,
+        workflow: e.workflow === undefined ? null : { runId: e.workflow.runId, agentIndex: e.workflow.agentIndex },
+        resumed: e.resume !== undefined,
+        denied: refused ? answer.deny : null,
+      }
+      await update($, agents, list => [...list, record].slice(-MAX_AGENTS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // A step: one model request. The stream is passed on untouched; its `tool`
   // chunks carry the tool_use_ids that tie the step to its tool calls.
   on('turn.step', async function* ($, e, next) {
@@ -906,7 +946,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -915,19 +955,23 @@ export const register: Register = on => {
         read($, resources),
         read($, breakdown),
         read($, compactions),
+        read($, agents),
       ])
 
     const columns = e.props.bodyColumns
     /** The width a line indented by `indent` cells may take, on the terminal. */
+    // How far in the part being drawn starts: a subagent's turns are drawn
+    // under the call that started it, so every width there is narrower.
+    let base = 0
     const fit = (indent: number) =>
-      e.surface === 'terminal' ? { width: Math.max(8, columns - indent) } : {}
+      e.surface === 'terminal' ? { width: Math.max(8, columns - base - indent) } : {}
     // Outside the terminal the width comes in cells of the surface's code font,
     // while the pane writes in its narrower proportional UI font: about 1.8
     // times as many characters fit. 1.6 fills the line without risking a wrap.
     const PROPORTIONAL = 1.6
     const usable = e.surface === 'terminal' ? columns : Math.floor(columns * PROPORTIONAL)
     /** The characters left on a line indented by `indent` cells. */
-    const room = (indent: number) => Math.max(12, usable - indent)
+    const room = (indent: number) => Math.max(12, usable - base - indent)
     /** One line of plain text, cut with "…" to `width` cells. */
     const cut = (text: string, width: number) => {
       const flat = text.replace(/\s+/g, ' ').trim()
@@ -1012,6 +1056,33 @@ export const register: Register = on => {
       })
     }
     allTurns.sort((a, b) => b.startedAt - a.startedAt)
+
+    // Each subagent under the call that started it. A subagent's turns belong
+    // to the latest of its spawns that came before them: a resumed agent keeps
+    // its id, and its new turns go to the resume. Turns whose call Glass Box
+    // did not record stay at the top level.
+    const spawnKey = (spawn: Spawn) => `${spawn.toolUseId}|${spawn.agentId ?? `refused-${spawn.at}`}`
+    const spawnsByCall = new Map<string, Spawn[]>()
+    for (const spawn of spawnList) {
+      const list = spawnsByCall.get(spawn.toolUseId) ?? []
+      list.push(spawn)
+      spawnsByCall.set(spawn.toolUseId, list)
+    }
+    const turnsBySpawn = new Map<string, Turn[]>()
+    const nestedTurns = new Set<string>()
+    for (const turn of allTurns) {
+      if (turn.agentId === null) continue
+      const own = spawnList.filter(sp => sp.agentId === turn.agentId && callById.has(sp.toolUseId))
+      const owner = [...own].reverse().find(sp => sp.at <= turn.startedAt) ?? own[0]
+      if (owner === undefined) continue
+      const list = turnsBySpawn.get(spawnKey(owner)) ?? []
+      list.push(turn)
+      turnsBySpawn.set(spawnKey(owner), list)
+      nestedTurns.add(turn.id)
+    }
+    const topTurns = allTurns.filter(t => !nestedTurns.has(t.id))
+    // Guards against drawing an agent inside itself.
+    const drawing = new Set<string>()
 
     const flipped = new Set(toggledList)
     const isOpen = (key: string, byDefault: boolean) => byDefault !== flipped.has(key)
@@ -1149,6 +1220,134 @@ export const register: Register = on => {
       )
     }
 
+    // A subagent, under the call that started it: one line that opens on what
+    // it was given and on its own turns. `outer` is how far in, from the
+    // current base, the box that holds it starts.
+    const agentRows = (call: ToolCall, outer: number) =>
+      (spawnsByCall.get(call.id) ?? []).map(spawn => {
+        const id = spawnKey(spawn)
+        if (drawing.has(id)) return null
+        drawing.add(id)
+        base += outer + 2
+        try {
+          return agentRow(spawn, id)
+        } finally {
+          base -= outer + 2
+          drawing.delete(id)
+        }
+      })
+
+    const agentRow = (spawn: Spawn, id: string) => {
+      const key = `a:${id}`
+      const agentTurns = (turnsBySpawn.get(id) ?? []).slice().sort((a, b) => a.startedAt - b.startedAt)
+      const last = agentTurns[agentTurns.length - 1]
+      const refused = spawn.denied !== null
+      const running = !refused && (last === undefined || last.outcome === null)
+      const outcome = last?.outcome != null ? TURN_OUTCOME[last.outcome] : undefined
+      const icon = refused ? '⊘' : running ? '●' : (outcome?.icon ?? '✓')
+      const color = refused ? 'error' : running ? 'warning' : (outcome?.color ?? 'success')
+      // Open while it works, so what a subagent does is seen as it happens.
+      const open = isOpen(key, running)
+      const agentSteps = agentTurns.flatMap(t => stepsByTurn.get(t.id) ?? [])
+      const toolCount = agentSteps.reduce((n, s) => n + s.toolIds.length, 0)
+      const costs = agentTurns.flatMap(t => (t.costUsd === null ? [] : [t.costUsd]))
+      const meta = refused
+        ? ['refused']
+        : [
+            spawn.model !== null ? shortModel(spawn.model) : null,
+            plural(agentSteps.length, 'step', 'steps'),
+            plural(toolCount, 'tool call', 'tool calls'),
+            running ? 'running' : formatDuration(agentTurns.reduce((n, t) => n + (t.durationMs ?? 0), 0)),
+            costs.length > 0 ? formatUsd(costs.reduce((n, c) => n + c, 0)) : null,
+            outcome?.label ?? null,
+          ]
+      const tags = [
+        spawn.fork ? 'fork' : null,
+        spawn.background ? 'background' : null,
+        spawn.teammate ? 'teammate' : null,
+        spawn.workflow !== null ? `workflow agent ${spawn.workflow.agentIndex}` : null,
+        spawn.resumed ? 'resumed' : null,
+        spawn.name !== null ? `“${spawn.name}”` : null,
+      ]
+      const head = [...meta, ...tags].filter(part => part !== null).join(' · ')
+      const how = [
+        spawn.fork
+          ? 'It is a fork: it starts from a copy of this conversation, on the same model.'
+          : 'It is a separate loop with a conversation of its own, which starts from the prompt below. Only its final answer comes back, as the call’s output.',
+        spawn.background ? 'It runs in the background: the call returned at once and the parent went on working.' : null,
+        spawn.teammate ? 'It is a teammate: a named agent that waits between turns and wakes on a message.' : null,
+        spawn.workflow !== null ? `It is agent ${spawn.workflow.agentIndex} of a workflow run (${spawn.workflow.runId}).` : null,
+        spawn.resumed ? 'This run continues an agent started earlier, with the same id.' : null,
+      ]
+        .filter(part => part !== null)
+        .join(' ')
+      const model =
+        spawn.model === null
+          ? null
+          : `model: ${spawn.model}${
+              spawn.fork
+                ? ' (a fork always runs on the parent’s model)'
+                : spawn.requested !== null
+                  ? ` (the call asked for ${spawn.requested})`
+                  : ` (the call named none: the agent type’s own model, else the parent’s, ${shortModel(spawn.parentModel)})`
+            }`
+      const clipped = spawn.promptChars > spawn.prompt.length ? ` · clipped, ${formatTokens(spawn.promptChars)} chars in all` : ''
+
+      return (
+        <Box key={`agent-${id}`} flexDirection="column" paddingLeft={2}>
+          <Box flexDirection="row" gap={1}>
+            <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
+            <Box {...fit(2)}>
+              {seg(room(2), [
+                { text: icon, color },
+                { text: ' Subagent', bold: true },
+                { text: ` ${spawn.type}` },
+                head !== '' && { text: ` · ${head}`, dim: true },
+              ])}
+            </Box>
+          </Box>
+          {open && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(0)}>
+              <Text dimColor wrap="wrap">
+                {`At ${formatTime(spawn.at)} this call started a subagent of type ${spawn.type}. ${how}`}
+              </Text>
+              {refused && (
+                <Text color="error" wrap="wrap">
+                  {`A plugin refused to start it: ${spawn.denied}`}
+                </Text>
+              )}
+              {model !== null && (
+                <Text dimColor wrap="wrap">
+                  {model}
+                </Text>
+              )}
+              {spawn.permissionMode !== null && (
+                <Text dimColor wrap="wrap">
+                  {`permission mode: ${spawn.permissionMode} (inherited from the parent)`}
+                </Text>
+              )}
+              <Text color="suggestion">{`prompt it was given${clipped}`}</Text>
+              <Text wrap="wrap">{tidy(spawn.prompt)}</Text>
+              {!refused && agentTurns.length === 0 && (
+                <Text dimColor wrap="wrap">
+                  (no turn recorded yet)
+                </Text>
+              )}
+            </Box>
+          )}
+          {open &&
+            agentTurns.map((turn, i) => {
+              base += 2
+              try {
+                return <Box key={`aturn-${turn.id}`} paddingLeft={2}>{renderTurn(turn, i === agentTurns.length - 1)}</Box>
+              } finally {
+                base -= 2
+              }
+            })}
+        </Box>
+      )
+    }
+
     const renderStep = (step: Step, previous: Step | undefined) => {
       const key = `s:${step.key}`
       const open = isOpen(key, false)
@@ -1209,6 +1408,7 @@ export const register: Register = on => {
             <Box key={`row-${call.id}`} flexDirection="column">
               {callLine(call, 2, false)}
               {open && callDetail(call, 2)}
+              {agentRows(call, 2)}
             </Box>
           ))}
         </Box>
@@ -1217,6 +1417,7 @@ export const register: Register = on => {
 
     const renderTurn = (turn: Turn, isNewest: boolean) => {
       const key = `t:${turn.id}`
+      const nested = nestedTurns.has(turn.id)
       const open = isOpen(key, isNewest)
       const turnSteps = (stepsByTurn.get(turn.id) ?? []).slice().sort((a, b) => a.index - b.index)
       const toolCount = turnSteps.reduce((n, s) => n + s.toolIds.length, 0)
@@ -1247,7 +1448,7 @@ export const register: Register = on => {
             <Box {...fit(2)}>
               {seg(room(2), [
                 { text: icon, color },
-                { text: turn.agentId !== null ? ' Subagent' : ' Turn', bold: true },
+                { text: turn.agentId !== null && !nested ? ' Subagent' : ' Turn', bold: true },
                 { text: ` · ${meta}`, dim: true },
               ])}
             </Box>
@@ -1257,6 +1458,13 @@ export const register: Register = on => {
               {open ? prompt : cut(prompt, room(2))}
             </Text>
           </Box>
+          {open && turn.agentId !== null && !nested && (
+            <Box paddingLeft={2} {...fit(2)}>
+              <Text dimColor wrap="wrap">
+                A subagent’s turn. Glass Box did not record the call that started it: it started before Glass Box loaded, or the call has left the history.
+              </Text>
+            </Box>
+          )}
           {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
           {open && (compactionsByTurn.get(turn.id) ?? []).map(c => compactionLine(c, 2))}
           {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
@@ -1536,9 +1744,9 @@ export const register: Register = on => {
           {term('g-w5', 'Permission rule.', 'A line in your settings, such as Bash(git:*), that allows or denies matching tool calls without asking.')}
           {term('g-w6', 'Hook.', 'A script from your settings or from a plugin that runs around a tool call and can allow, deny or change it.')}
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
-          {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task. It has its own turns, steps and tool calls, shown as Subagent turns.')}
+          {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task, with a conversation of its own. It is drawn under the Agent call that started it: its type, its model, the prompt it was given, and its own turns, steps and tool calls.')}
           {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
-          {term('g-w13', 'System prompt.', 'The standing instructions sent before the conversation on every request: how Claude Code works, your environment, your tools. The Instructions tab shows it section by section.')}
+          {term('g-w13', 'System prompt.', 'The standing instructions sent before the conversation on every request: how Claude Code works, your environment, your tools. The Prompt tab shows it section by section.')}
           {term('g-w14', 'Instruction files.', 'Your CLAUDE.md files (and the files they import with @). They reach the model in front of the conversation’s first message.')}
           {term('g-w15', 'Skill.', 'A packaged set of instructions Claude loads only when a task needs it, so it costs context only then.')}
           {term('g-w16', 'ToolSearch.', 'How Claude Code keeps many tools available without sending all their descriptions: the model sees their names, and loads a tool’s full description when it needs it.')}
@@ -1963,6 +2171,7 @@ export const register: Register = on => {
               await update($, injections, () => [])
               await update($, skills, () => [])
               await update($, compactions, () => [])
+              await update($, agents, () => [])
               await update($, toggled, () => [])
             })
           }
@@ -1997,7 +2206,7 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">New to this? Open the Guide (press g while the pane has the keyboard).</Text>
           </Box>
         )}
-        {allTurns.map((turn, i) => renderTurn(turn, i === 0))}
+        {topTurns.map((turn, i) => renderTurn(turn, i === 0))}
         {orphans.length > 0 && (
           <Box key="orphans" flexDirection="column" marginTop={1}>
             <Box flexDirection="row" gap={1}>
@@ -2013,6 +2222,7 @@ export const register: Register = on => {
               <Box key={`row-${call.id}`} flexDirection="column">
                 {callLine(call, 2, true)}
                 {othersOpen && callDetail(call, 2)}
+                {agentRows(call, 0)}
               </Box>
             ))}
           </Box>

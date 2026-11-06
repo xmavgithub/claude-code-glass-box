@@ -94,13 +94,15 @@ In the Timeline:
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
 | **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
+| **Subagent** | Under the Agent call that started it: its type, the model it runs on, steps, tool calls, duration, cost, and whether it is a fork, runs in the background, is a teammate or a workflow's agent. Open while it works | What kind of agent it is, the model the call asked for, the permission mode it inherits, the prompt it was given, and its own turns, steps and tool calls (and the subagents it starts, nested again) |
 | **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
 steps, tool calls and failures for the session, with **Guide** (`g`) and
-**Clear** (`c`) beside it. Tool calls that no recorded
-step asked for (raised by another plugin, or made before Glass Box loaded) are
-listed at the bottom under **Other tool calls**.
+**Clear** (`c`) beside it. A subagent's turn whose Agent call Glass Box did
+not record (it started before Glass Box loaded) is listed at the top level.
+Tool calls that no recorded step asked for (raised by another plugin, or made
+before Glass Box loaded) are listed at the bottom under **Other tool calls**.
 
 ## Install
 
@@ -149,6 +151,7 @@ not installed.
 | `turn.step` (streamed) | Model, effort, message count; then the text, tokens and stop reason. The stream's `tool` chunks carry the `tool_use_id`s that tie a step to its tool calls |
 | `tool.check` | The permission verdict and what decided it |
 | `tool.call` | Arguments, result text, error or deny, duration |
+| `agent.spawn` | A subagent starting: the call that started it (its `tool_use_id`), type, prompt, the model asked for and the one resolved, fork, background, teammate, workflow. Its `agentId` ties it to its turns |
 
 ## Privacy
 
@@ -176,8 +179,7 @@ not installed.
 
 Glass Box is in development towards 1.0, with no releases before then. See
 [ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held to,
-what is done, and the milestones ahead: the context window and cost,
-subagents tied to the calls that started them, and the model's reasoning.
+what is done, and the milestones ahead, next the model's reasoning.
 Discussion and pull requests are welcome.
 
 ## Development

@@ -70,6 +70,14 @@ everything below is on `main`. 1.0 will be released when the criteria in
 - **Server tools** such as the advisor get their own row: duration, model
   (from the result, or the `advisorModel` in your settings), input and
   result read from the transcript.
+- **Subagents** under the Agent call that started them, as a tree: type,
+  the model it runs on and the one the call asked for, steps, tool calls,
+  duration, cost, and tags for a fork, a background agent, a teammate, a
+  workflow's agent or a resumed run. Open, it tells what kind of agent it is,
+  the permission mode it inherits, the prompt it was given and its own
+  turns, steps and tool calls, nested again for agents it starts. It stays
+  open while it works (`agent.spawn`). A subagent's turn whose call Glass Box
+  did not record stays at the top level and says why.
 
 #### Clarity
 

@@ -58,6 +58,46 @@ export type Compaction = {
   skipped: string | null
 }
 
+/**
+ * A subagent started: the Agent call it belongs to, what it was asked to do
+ * and the model it runs on, as `agent.spawn` reported it.
+ */
+export type Spawn = {
+  /** The tool call that started it: the model's Agent call (or a Workflow call). */
+  toolUseId: string
+  /** The started agent's id, which its turns carry; null when it was refused. */
+  agentId: string | null
+  /** The loop it was started from; null for the main loop. */
+  parentAgentId: string | null
+  at: number
+  /** The agent type: general-purpose, Explore, a plugin's agent, fork. */
+  type: string
+  /** The call's short description of the task. */
+  description: string
+  /** The task it was given, clipped. */
+  prompt: string
+  promptChars: number
+  /** The model asked for by the call (an alias or an id); null when none. */
+  requested: string | null
+  /** The model it runs on, as resolved; null when it was refused. */
+  model: string | null
+  /** The model of the loop that started it, what "inherit" means. */
+  parentModel: string
+  /** The permission mode it inherits. */
+  permissionMode: string | null
+  background: boolean
+  fork: boolean
+  teammate: boolean
+  /** The name SendMessage addresses it by, when it has one. */
+  name: string | null
+  /** For a workflow's agent: its run and its place in the run. */
+  workflow: { runId: string; agentIndex: number } | null
+  /** True when this run continues an agent started earlier. */
+  resumed: boolean
+  /** Why a plugin refused it; null when it started. */
+  denied: string | null
+}
+
 /** One section of the system prompt, as it was sent. */
 export type PromptPart = {
   id: string
@@ -283,6 +323,7 @@ declare module 'claude-code' {
       resources: Shaped<Resources | null>
       breakdown: Shaped<Breakdown | null>
       compactions: Shaped<Compaction[]>
+      agents: Shaped<Spawn[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

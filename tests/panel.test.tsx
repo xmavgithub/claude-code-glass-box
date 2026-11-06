@@ -585,3 +585,92 @@ test('a value an earlier version stored is declined', async ($, on) => {
   expect(has(await texts(ui), /^Nothing yet\. Send Claude a message/)).toBe(true)
   await ui.unmount()
 })
+
+test('a subagent is drawn under the Agent call that started it, with its type, model, prompt and turns', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    if (e.turnId === 'T1' && e.index === 0) yield { kind: 'tool', index: 0, id: 'toolu_A', name: 'Agent' } as const
+    if (e.turnId === 'S1') yield { kind: 'tool', index: 0, id: 'toolu_R', name: 'Read' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+  })
+  on('tool.check', () => ({ decision: 'allow' }) as const)
+  // The Agent call stays open while its subagent works, as in the engine.
+  let release = () => {}
+  const gate = new Promise<void>(resolve => (release = resolve))
+  on('tool.call', async (_, e) => {
+    if (e.tool === 'Agent') await gate
+    return { result: {}, text: 'done' }
+  })
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'A1' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+
+  const drain = async (turnId: string, index: number, agentId?: string) => {
+    const step = $.turn.step({ turnId, index, model: 'claude-opus-5-5', messageCount: 1, ...(agentId ? { agentId } : {}) } as never)
+    for await (const _chunk of step) {
+      // drain
+    }
+  }
+
+  // A subagent turn whose call Glass Box never saw stays at the top level.
+  await $.turn.start({ turnId: 'S2', text: 'an older helper', agentId: 'B9' } as never)
+  await $.turn.start({ turnId: 'T1', text: 'look around' })
+  await drain('T1', 0)
+  await $.tool.check({ tool: 'Agent', input: { description: 'find the config', prompt: 'Find where the config is read.' }, tool_use_id: 'toolu_A' } as never)
+  const agentCall = $.tool.call({ tool: 'Agent', description: 'find the config', prompt: 'Find where the config is read.', tool_use_id: 'toolu_A' } as never)
+  await $.agent.spawn({
+    tool_use_id: 'toolu_A',
+    prompt: 'Find where the config is read.',
+    description: 'find the config',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    model: 'haiku',
+    parentModel: 'claude-opus-5-5',
+    permissionMode: 'default',
+    background: false,
+    fork: false,
+  } as never)
+  await $.turn.start({ turnId: 'S1', text: 'Find where the config is read.', agentId: 'A1' } as never)
+  await drain('S1', 0, 'A1')
+
+  // While it works, the subagent is open: its prompt and its turn show.
+  const live = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const during = await texts(live)
+  expect(has(during, /^● Subagent Explore · haiku-5-5 · 1 step · 1 tool call · running$/)).toBe(true)
+  expect(during).toContain('Find where the config is read.')
+  expect(has(during, /model: claude-haiku-5-5 \(the call asked for haiku\)/)).toBe(true)
+  await live.unmount()
+
+  await $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'toolu_R', agentId: 'A1' } as never)
+  await $.turn.complete({ turnId: 'S1', agentId: 'A1', reason: 'answer', answer: 'In app.ts', durationMs: 3000, isAborted: false } as never)
+  release()
+  await agentCall
+  await $.turn.complete({ turnId: 'T1', reason: 'answer', answer: 'Found it', durationMs: 5000, isAborted: false } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const all = await texts(ui)
+    expect(has(all, /^✓ Subagent Explore · haiku-5-5 · 1 step · 1 tool call · 3\.0s$/)).toBe(true)
+    // Done, it folds away: its turn is not drawn, and is not a top-level turn.
+    expect(all).not.toContain('“Find where the config is read.”')
+    expect(has(all, /^● Subagent · /)).toBe(true)
+    // The agent's line sits right under the Agent call.
+    const order = all.filter(t => /^. (Agent|Subagent Explore)\b/.test(t)).map(t => t.split(' ')[1])
+    expect(order).toEqual(['Agent', 'Subagent'])
+
+    await ui.press({ key: 'a:toolu_A|A1' })
+    const open = await texts(ui)
+    expect(has(open, /this call started a subagent of type Explore\. It is a separate loop/)).toBe(true)
+    expect(open).toContain('permission mode: default (inherited from the parent)')
+    expect(open).toContain('“Find where the config is read.”')
+    expect(has(open, /^✓ Read /)).toBe(true)
+    await ui.press({ key: 'a:toolu_A|A1' })
+    await ui.unmount()
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 't:S2' })
+  expect(has(await texts(ui), /Glass Box did not record the call that started it/)).toBe(true)
+  await ui.unmount()
+})

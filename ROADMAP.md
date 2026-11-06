@@ -36,7 +36,8 @@ advisor, tool calls and their permission verdicts, calls a hook rewrote,
 everything added to the model's context), and what the model is told (the
 system prompt, the first message's context blocks and CLAUDE.md files, the
 tools offered, the skills loaded), and the resources (the context window and
-what fills it, cost per session and per turn, rate limits, compactions). Four
+what fills it, cost per session and per turn, rate limits, compactions), and
+who did the work (each subagent under the call that started it). Four
 tabs (Timeline, Stats, Prompt, Context) and a Guide.
 
 ## Next
@@ -84,9 +85,9 @@ Code events they build on.
 
 > "Who did the work?"
 
-- [ ] **Subagents tied to their call.** Link each `Agent` call to the subagent
+- [x] **Subagents tied to their call.** Link each `Agent` call to the subagent
   turn it started, with its type, model and prompt (`agent.spawn`).
-- [ ] **Agent tree.** Nested agents shown as a tree, each with its own steps
+- [x] **Agent tree.** Nested agents shown as a tree, each with its own steps
   and tool calls.
 
 ### Reasoning (experimental)
