@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-06
+
 ### Fixed
 
 - A step whose response is interrupted (Esc during a turn) no longer stays
@@ -38,5 +40,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - First version, never published on its own: a pane listing every tool call with status, duration,
   main argument, and expandable input and output.
 
-[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/xmavgithub/claude-code-glass-box/releases/tag/v0.2.0
