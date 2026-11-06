@@ -79,12 +79,12 @@ test('a turn shows its prompt, its steps, and under each step the tool calls it 
 
     expect(all).toContain('1 turn · 2 steps · 1 tool call · 0 failed')
     expect(all).toContain('“list the files here”')
-    expect(has(all, /^✓ Turn · \d\d:\d\d · 2 steps · 1 tool · ctx 42\.2k · 4\.2s$/)).toBe(true)
+    expect(has(all, /^✓ Turn · \d\d:\d\d · 2 steps · 1 tool call · context 42\.2k · 4\.2s$/)).toBe(true)
     // The model shows on the first step only, as it does not change.
-    expect(has(all, /^✓ Step 1 · opus-5-5 high · [\d.]+m?s · out 340 · → tools$/)).toBe(true)
-    expect(has(all, /^✓ Step 2 · [\d.]+m?s · out 340 · done$/)).toBe(true)
+    expect(has(all, /^✓ Step 1 · opus-5-5 · high effort · [\d.]+m?s · wrote 340 tokens · asked for 1 tool$/)).toBe(true)
+    expect(has(all, /^✓ Step 2 · [\d.]+m?s · wrote 340 tokens · answered$/)).toBe(true)
     expect(all).toContain('› Let me list the files.')
-    expect(has(all, /^✓ Bash {2}[\d.]+m?s {2}Bash\(ls:\*\) {2}ls$/)).toBe(true)
+    expect(has(all, /^✓ Bash {2}[\d.]+m?s {2}allowed: rule Bash\(ls:\*\) {2}ls$/)).toBe(true)
     // The call sits under step 1, before step 2: no "Other tool calls" section.
     const order = all
       .filter(t => /^✓ (Step \d|Bash) /.test(t))
@@ -123,6 +123,7 @@ test('opening a step shows its token breakdown and its calls in full', async ($,
   expect(has(open, /^tokens: 42\.2k context \(41\.0k cached, 1\.2k written, 12 new\) · 340 output$/)).toBe(true)
   expect(has(open, /"command": "ls -la"/)).toBe(true)
   expect(open).toContain('file1\nfile2')
+  expect(open).toContain('Allowed without asking: Read-only command')
   expect(open).toContain('decision: allow\nreason: Read-only command')
 
   await ui.press({ key: 's:T1:0' })
@@ -174,7 +175,7 @@ test('a step whose stream is closed early (an interrupted turn) does not stay ru
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const all = await texts(ui)
-  expect(has(all, /^✗ Step 1 · .* · no response$/)).toBe(true)
+  expect(has(all, /^✗ Step 1 · .* · no response \(interrupted or failed\)$/)).toBe(true)
   expect(has(all, /^● Step 1/)).toBe(false)
   await ui.unmount()
 })
@@ -237,8 +238,8 @@ test('the Stats tab sums up tools, permissions and the model', async ($, on) => 
     expect(has(all, /^Bash *  2 calls · 1 failed · 2\.0s · avg 1\.0s$/)).toBe(true)
     expect(has(all, /^2 *  by a settings rule$/)).toBe(true)
     expect(has(all, /^2 *  rule Bash\(ls:\*\)$/)).toBe(true)
-    expect(has(all, /^output *  340 tokens$/)).toBe(true)
-    expect(has(all, /^context *  peak 42\.2k · 97% from cache$/)).toBe(true)
+    expect(has(all, /^output *  340 tokens written$/)).toBe(true)
+    expect(has(all, /^context *  largest 42\.2k tokens · 97% read from cache$/)).toBe(true)
 
     await ui.press({ key: 'v:timeline' })
     expect(await ui.find({ type: 'Text', text: 'Tools' })).toBeUndefined()
@@ -246,10 +247,99 @@ test('the Stats tab sums up tools, permissions and the model', async ($, on) => 
   }
 })
 
+test('How it works explains the loop, with the numbers of the last turn', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 1000) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: 'Hi', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+  })
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const empty = await $.ui.mount({ ...PANE, surface })
+    await empty.press({ key: 'v:guide' })
+    expect(await texts(empty)).toContain('Once you send a message, your own numbers appear here.')
+    await empty.press({ key: 'v:timeline' })
+    await empty.unmount()
+  }
+
+  await $.turn.start({ turnId: 'T1', text: 'hello' })
+  const step = $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  for await (const _chunk of step) {
+    // drain
+  }
+  await $.turn.complete({ turnId: 'T1', reason: 'answer', answer: 'Hi', durationMs: 2500, isAborted: false } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'v:guide' })
+  const all = await texts(ui)
+  expect(all).toContain('The loop')
+  expect(has(all, /^2\. Step\. Claude Code sends the whole conversation/)).toBe(true)
+  expect(all).toContain('Your last turn: 1 step, 0 tool calls, 340 tokens written, 2.5s.')
+  expect(has(all, /^Context\. Everything the model reads at a step/)).toBe(true)
+  await ui.unmount()
+})
+
+test('the advisor shows as its own row: time, model, and its advice read from the transcript', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 1000) }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('settings.read', () => ({ value: { advisorModel: 'fable' } }))
+  on('command.register', () => ({ value: { command: 'glass-box' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: 'Done.',
+      toolUses: [],
+      serverToolUses: [{ id: 'srvtoolu_1', name: 'advisor', input: {}, startedAt: 1000, endedAt: 4200 }],
+      stopReason: 'end_turn',
+      usage: USAGE,
+    } as const
+  })
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', content: [{ type: 'text', text: 'review this' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} },
+          { type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_result', text: 'Check the edge case first.' } },
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+    ],
+  }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ turnId: 'T1', text: 'review this' })
+  const step = $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  for await (const _chunk of step) {
+    // drain
+  }
+  await $.turn.complete({ turnId: 'T1', reason: 'answer', answer: 'Done.', durationMs: 5000, isAborted: false } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(has(await texts(ui), /^✓ advisor {2}3\.2s {2}ran by the model API {2}model fable \(from your settings\)$/)).toBe(true)
+
+  await ui.press({ key: 's:T1:0' })
+  const open = await texts(ui)
+  expect(open).toContain('Check the edge case first.')
+  expect(has(open, /^The model API ran advisor itself, inside this step/)).toBe(true)
+
+  await ui.press({ key: 'v:stats' })
+  expect(has(await texts(ui), /^advisor ·server tool *  1 call · 3\.2s · avg 3\.2s$/)).toBe(true)
+  await ui.unmount()
+})
+
 test('a value an earlier version stored is declined', async ($, on) => {
   on('state.get', () => ({ value: { value: [{ tool: 'Bash' }], version: 1 } }))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await texts(ui)).toContain('Nothing yet: send a prompt and watch it unfold here.')
+  expect(has(await texts(ui), /^Nothing yet\. Send Claude a message/)).toBe(true)
   await ui.unmount()
 })

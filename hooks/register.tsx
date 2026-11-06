@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
-import type { CallStatus, Step, ToolCall, Turn, Usage, Verdict, View } from '../types'
+import type { CallStatus, ServerTool, Step, ToolCall, Turn, Usage, Verdict, View } from '../types'
 
 const PANE = 'glass-box'
 const TITLE = 'Glass Box'
@@ -19,7 +19,7 @@ const MAX_OUTPUT = 1500
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
 const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-1' })
-const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-1' })
+const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-2' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
   shape: 'verdicts-1',
@@ -32,11 +32,14 @@ const view = atom({ plugin: 'glass-box', key: 'view' } as const, 'timeline', { s
 const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
   { id: 'stats', label: 'Stats', hotkey: '2' },
+  { id: 'guide', label: 'How it works', hotkey: '3' },
 ]
 
-// The session's working directory, to show paths relative to it. Set at
-// session.start, which runs again on every reload.
+// The session's working directory, to show paths relative to it, and the
+// advisor model the settings name. Set at session.start, which runs again on
+// every reload.
 let cwd = ''
+let advisorModel: string | null = null
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,16 +163,29 @@ const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string 
   refusal: { icon: '✗', color: 'error', label: 'refused' },
 }
 
+/** Why the model stopped writing, in plain words. `tool_use` is told with its count. */
 const STOP_REASON: Record<string, string> = {
-  tool_use: '→ tools',
-  end_turn: 'done',
-  max_tokens: 'hit max tokens',
-  stop_sequence: 'stop sequence',
+  tool_use: 'asked for tools',
+  end_turn: 'answered',
+  max_tokens: 'stopped: output limit reached',
+  stop_sequence: 'stopped at a stop sequence',
   pause_turn: 'paused',
-  compaction: 'compaction',
+  compaction: 'compacted the context',
   refusal: 'refused',
-  model_context_window_exceeded: 'context full',
+  model_context_window_exceeded: 'stopped: context full',
 }
+
+function stopLabel(step: Step): string {
+  if (step.durationMs === null) return 'running'
+  if (step.stopReason === null) return 'no response (interrupted or failed)'
+  if (step.stopReason === 'tool_use' && step.toolIds.length > 0) {
+    return `asked for ${plural(step.toolIds.length, 'tool', 'tools')}`
+  }
+  return STOP_REASON[step.stopReason] ?? step.stopReason
+}
+
+const modelLabel = (step: Step) =>
+  `${shortModel(step.model)}${step.effort !== null ? ` · ${step.effort} effort` : ''}`
 
 /** What the permission check on a call came to. */
 type VerdictKind = 'rule' | 'hook' | 'allowed' | 'approved' | 'rejected' | 'awaiting' | 'denied' | 'none'
@@ -202,14 +218,105 @@ function verdictOutcome(v: Verdict | undefined, call: ToolCall): { label: string
     case 'rejected':
       return { label: 'rejected', color: 'error' }
     case 'rule':
-      return { label: v?.rule ?? 'rule' }
+      return { label: `allowed: rule ${v?.rule ?? ''}` }
+    case 'hook':
+      return { label: 'allowed: hook' }
     default:
       return { label: kind }
   }
 }
 
+/** The verdict as a sentence anyone can read. */
+function explainVerdict(v: Verdict | undefined, call: ToolCall): string {
+  const kind = verdictKind(v, call)
+  const why = v?.reason != null ? ` (${v.reason})` : ''
+  switch (kind) {
+    case 'none':
+      return 'No permission check was recorded for this call: it may have started before Glass Box loaded, or another plugin raised it.'
+    case 'rule':
+      return `Allowed without asking: your settings contain the rule ${v?.rule ?? ''}.`
+    case 'hook':
+      return `Allowed by a ${v?.hook ?? ''} hook: a script from your settings or from a plugin approved it before it ran.`
+    case 'allowed':
+      return v?.reason != null
+        ? `Allowed without asking: ${v.reason}`
+        : 'Allowed without asking, by the permission mode or because the tool only reads.'
+    case 'approved':
+      return `Claude Code asked for approval${why}, and the call was approved: by you, or automatically in auto mode.`
+    case 'rejected':
+      return `Claude Code asked for approval${why}, and the call was rejected. The model was told it could not run.`
+    case 'awaiting':
+      return `Waiting for approval${why}.`
+    case 'denied': {
+      const by = v?.rule != null ? ` by the rule ${v.rule} in your settings` : v?.hook != null ? ` by a ${v.hook} hook` : ''
+      return `Denied${by}${why}. The tool did not run; the model was told why.`
+    }
+  }
+}
+
 async function patchStep($: EngineInterface, key: string, patch: (step: Step) => Step) {
   await update($, steps, list => list.map(step => (step.key === key ? patch(step) : step)))
+}
+
+/** Every string under a key named `key`, depth first, in a block of unknown shape. */
+function collect(value: unknown, key: string, out: string[] = [], depth = 0): string[] {
+  if (depth > 6 || value === null || typeof value !== 'object') return out
+  if (Array.isArray(value)) {
+    for (const item of value) collect(item, key, out, depth + 1)
+    return out
+  }
+  for (const [k, v] of Object.entries(value)) {
+    if (k === key && typeof v === 'string') out.push(v)
+    else collect(v, key, out, depth + 1)
+  }
+  return out
+}
+
+/**
+ * Server tools run inside the model request: their result is in the
+ * transcript, not in the step's result. Read it back from the conversation,
+ * in its API form, for every server tool of this loop still without one.
+ */
+async function fillServerResults($: EngineInterface, agentId: string | null) {
+  const list = await read($, steps)
+  const pending = new Set(
+    list
+      .filter(s => s.agentId === agentId)
+      .flatMap(s => s.serverTools.filter(t => t.output === null).map(t => t.id)),
+  )
+  if (pending.size === 0) return
+
+  const answer = await $.session.messages(agentId === null ? { as: 'api' } : { as: 'api', agentId })
+  if (!Array.isArray(answer)) return // a hook refused the read
+  const messages = answer
+  const found = new Map<string, { output: string; model: string | null }>()
+  for (const message of messages) {
+    for (const block of message.content) {
+      const id = block['tool_use_id']
+      if (typeof id !== 'string' || !pending.has(id)) continue
+      const { type: _type, tool_use_id: _id, ...rest } = block
+      const text = collect(rest, 'text').join('\n')
+      found.set(id, {
+        output: clip(text !== '' ? text : JSON.stringify(rest, null, 2), MAX_OUTPUT),
+        model: collect(rest, 'model')[0] ?? null,
+      })
+    }
+  }
+  if (found.size === 0) return
+
+  await update($, steps, all =>
+    all.map(step =>
+      step.serverTools.some(t => found.has(t.id))
+        ? {
+            ...step,
+            serverTools: step.serverTools.map(t => {
+              const hit = found.get(t.id)
+              return hit === undefined ? t : { ...t, output: hit.output, model: hit.model }
+            }),
+          }
+        : step,
+    ),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +325,10 @@ async function patchStep($: EngineInterface, key: string, patch: (step: Step) =>
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
+    await quietly(async () => {
+      const model = await $.settings.read({ key: 'advisorModel' })
+      advisorModel = typeof model === 'string' && model !== '' ? model : null
+    })
     await $.command.register({
       name: 'glass-box',
       description: 'Open the Glass Box pane: every turn, model step and tool call of this session',
@@ -260,6 +371,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
+    await quietly(() => fillServerResults($, e.agentId ?? null))
     await quietly(() =>
       update($, turns, list =>
         list.map(turn =>
@@ -277,6 +389,8 @@ export const register: Register = on => {
   // chunks carry the tool_use_ids that tie the step to its tool calls.
   on('turn.step', async function* ($, e, next) {
     const key = `${e.turnId}:${e.index}`
+    // The previous step's server tools are in the transcript by now.
+    await quietly(() => fillServerResults($, e.agentId ?? null))
     const startedAt = await now($)
     const step: Step = {
       key,
@@ -326,7 +440,20 @@ export const register: Register = on => {
             ? { stopReason: null }
             : {
                 answer: clip(done.answer, MAX_ANSWER),
-                serverTools: (done.serverToolUses ?? []).map(use => use.name),
+                serverTools: (done.serverToolUses ?? []).map(
+                  (use): ServerTool => ({
+                    id: use.id,
+                    name: use.name,
+                    input:
+                      use.input !== null && typeof use.input === 'object'
+                        ? stringify(use.input as Record<string, unknown>)
+                        : JSON.stringify(use.input ?? null),
+                    startedAt: use.startedAt,
+                    durationMs: use.endedAt === undefined ? null : Math.round(use.endedAt - use.startedAt),
+                    output: null,
+                    model: null,
+                  }),
+                ),
                 stopReason: done.stopReason,
                 usage: usageOf(done.usage),
               }),
@@ -493,9 +620,9 @@ export const register: Register = on => {
     const callDetail = (call: ToolCall, indent: number) => {
       const verdict = verdictById.get(call.id)
       const status = CALL_STATUS[call.status]
-      const permission =
+      const technical =
         verdict === undefined
-          ? '(no verdict recorded)'
+          ? null
           : [
               `decision: ${verdict.decision}`,
               verdict.reason !== null ? `reason: ${verdict.reason}` : null,
@@ -517,8 +644,49 @@ export const register: Register = on => {
             {call.output === '' ? (call.status === 'running' ? '(running)' : '(empty)') : tidy(call.output)}
           </Text>
           <Text color="suggestion">permission</Text>
-          <Text wrap="wrap" dimColor={verdict === undefined}>
-            {permission}
+          <Text wrap="wrap">{explainVerdict(verdict, call)}</Text>
+          {technical !== null && (
+            <Text wrap="wrap" dimColor>
+              {technical}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+
+    // A tool the model API ran inside the step: no permission check, no call.
+    const serverModel = (tool: ServerTool) =>
+      tool.model ?? (tool.name === 'advisor' && advisorModel !== null ? `${advisorModel} (from your settings)` : null)
+
+    const serverLine = (tool: ServerTool, indent: number) => {
+      const done = tool.durationMs !== null
+      const model = serverModel(tool)
+
+      return (
+        <Box key={`server-${tool.id}`} paddingLeft={indent} {...fit(indent)}>
+          <Text wrap="truncate-end">
+            <Text color={done ? 'success' : 'warning'}>{done ? '✓' : '●'}</Text>
+            <Text bold>{` ${tool.name}`}</Text>
+            <Text dimColor>{`  ${formatDuration(tool.durationMs)}  ran by the model API`}</Text>
+            {model !== null && <Text>{`  model ${model}`}</Text>}
+          </Text>
+        </Box>
+      )
+    }
+
+    const serverDetail = (tool: ServerTool, indent: number) => {
+      const model = serverModel(tool)
+
+      return (
+        <Box key={`sdetail-${tool.id}`} flexDirection="column" paddingLeft={indent + 2} marginBottom={1} {...fit(indent + 2)}>
+          <Text dimColor wrap="wrap">
+            {`The model API ran ${tool.name} itself, inside this step, at ${formatTime(tool.startedAt)}. Claude Code ran nothing for it: no permission check, no tool call.${model !== null ? ` Model: ${model}.` : ''}`}
+          </Text>
+          <Text color="suggestion">input</Text>
+          <Text wrap="wrap">{tool.input}</Text>
+          <Text color="suggestion">output</Text>
+          <Text wrap="wrap" dimColor={tool.output === null}>
+            {tool.output === null ? '(not read from the transcript yet: it is read when the next step or the turn ends)' : tool.output}
           </Text>
         </Box>
       )
@@ -534,14 +702,10 @@ export const register: Register = on => {
       // The model only where it changes: the first step, or a switch.
       const model =
         previous === undefined || previous.model !== step.model || previous.effort !== step.effort
-          ? `${shortModel(step.model)}${step.effort !== null ? ` ${step.effort}` : ''} · `
+          ? `${modelLabel(step)} · `
           : ''
-      const out = step.usage !== null ? ` · out ${formatTokens(step.usage.output)}` : ''
-      const state = isRunning
-        ? 'running'
-        : step.stopReason === null
-          ? 'no response'
-          : STOP_REASON[step.stopReason] ?? step.stopReason
+      const out = step.usage !== null ? ` · wrote ${formatTokens(step.usage.output)} tokens` : ''
+      const state = stopLabel(step)
       const stepCalls = step.toolIds.flatMap(id => {
         const call = callById.get(id)
         return call === undefined ? [] : [call]
@@ -571,18 +735,21 @@ export const register: Register = on => {
           {open && (
             <Box flexDirection="column" paddingLeft={2} marginBottom={1} {...fit(4)}>
               <Text dimColor wrap="wrap">
-                {`${shortModel(step.model)}${step.effort !== null ? ` · effort ${step.effort}` : ''} · ${step.messageCount} messages · started ${formatTime(step.startedAt)}`}
+                {`At ${formatTime(step.startedAt)} Claude Code sent the conversation (${plural(step.messageCount, 'message', 'messages')}) to ${modelLabel(step)}.`}
               </Text>
               {step.usage !== null && (
                 <Text dimColor wrap="wrap">
                   {`tokens: ${formatTokens(contextTokens(step.usage))} context (${formatTokens(step.usage.cacheRead)} cached, ${formatTokens(step.usage.cacheWrite)} written, ${formatTokens(step.usage.input)} new) · ${formatTokens(step.usage.output)} output`}
                 </Text>
               )}
-              {step.serverTools.length > 0 && (
-                <Text dimColor wrap="wrap">{`server tools: ${step.serverTools.join(', ')}`}</Text>
-              )}
             </Box>
           )}
+          {step.serverTools.map(tool => (
+            <Box key={`srow-${tool.id}`} flexDirection="column">
+              {serverLine(tool, 2)}
+              {open && serverDetail(tool, 2)}
+            </Box>
+          ))}
           {stepCalls.map(call => (
             <Box key={`row-${call.id}`} flexDirection="column">
               {callLine(call, 2, false)}
@@ -605,8 +772,8 @@ export const register: Register = on => {
       const meta = [
         formatTime(turn.startedAt).slice(0, 5),
         plural(turnSteps.length, 'step', 'steps'),
-        plural(toolCount, 'tool', 'tools'),
-        lastUsage !== null ? `ctx ${formatTokens(contextTokens(lastUsage))}` : null,
+        plural(toolCount, 'tool call', 'tool calls'),
+        lastUsage !== null ? `context ${formatTokens(contextTokens(lastUsage))}` : null,
         outcome === undefined ? 'running' : formatDuration(turn.durationMs),
         outcome?.label ?? null,
       ]
@@ -683,7 +850,21 @@ export const register: Register = on => {
               .join(' · '),
           }
         })
-        .sort((a, b) => b.count - a.count)
+      const byServerTool = new Map<string, ServerTool[]>()
+      for (const tool of stepList.flatMap(s => s.serverTools)) {
+        const list = byServerTool.get(tool.name) ?? []
+        list.push(tool)
+        byServerTool.set(tool.name, list)
+      }
+      for (const [name, list] of byServerTool) {
+        const total = list.reduce((ms, t) => ms + (t.durationMs ?? 0), 0)
+        toolRows.push({
+          label: `${name} ·server tool`,
+          count: list.length,
+          value: `${plural(list.length, 'call', 'calls')} · ${formatDuration(total)} · avg ${formatDuration(Math.round(total / list.length))}`,
+        })
+      }
+      toolRows.sort((a, b) => b.count - a.count)
       const labelWidth = Math.min(24, Math.max(4, ...toolRows.map(r => r.label.length)))
 
       const kinds = new Map<VerdictKind, number>()
@@ -743,8 +924,8 @@ export const register: Register = on => {
           {section('Model')}
           {line('m-steps', 'steps', `${stepList.length}${finished.length > 0 ? ` · avg ${formatDuration(Math.round(modelMs / finished.length))}` : ''}`, 13)}
           {line('m-time', 'time', `${formatDuration(modelMs)} in the model · ${formatDuration(toolMs)} in tools`, 13)}
-          {line('m-out', 'output', `${formatTokens(output)} tokens`, 13)}
-          {line('m-ctx', 'context', `peak ${formatTokens(peak)}${context > 0 ? ` · ${Math.round((cached / context) * 100)}% from cache` : ''}`, 13)}
+          {line('m-out', 'output', `${formatTokens(output)} tokens written`, 13)}
+          {line('m-ctx', 'context', `largest ${formatTokens(peak)} tokens${context > 0 ? ` · ${Math.round((cached / context) * 100)}% read from cache` : ''}`, 13)}
           {line('m-stop', 'stops', [...stops.entries()].map(([label, n]) => `${label} ${n}`).join(' · ') || '—', 13)}
           {line('m-models', 'models', [...models.entries()].map(([m, n]) => `${m} ${n}`).join(' · ') || '—', 13)}
           <Box paddingLeft={2} marginTop={1} {...fit(2)}>
@@ -752,6 +933,70 @@ export const register: Register = on => {
               {`Over what Glass Box keeps: the last ${MAX_TURNS} turns and ${MAX_CALLS} tool calls. Time in tools adds up calls that ran in parallel.`}
             </Text>
           </Box>
+        </Box>
+      )
+    }
+
+    // --- How it works: the agent loop, told with the session's own numbers.
+
+    const para = (key: string, text: string, dim = false) => (
+      <Box key={key} paddingLeft={2} {...fit(2)}>
+        <Text wrap="wrap" dimColor={dim}>
+          {text}
+        </Text>
+      </Box>
+    )
+    const term = (key: string, name: string, text: string) => (
+      <Box key={key} paddingLeft={2} {...fit(2)}>
+        <Text wrap="wrap">
+          <Text bold>{name}</Text>
+          <Text dimColor>{` ${text}`}</Text>
+        </Text>
+      </Box>
+    )
+
+    const renderGuide = () => {
+      const last = allTurns.find(t => t.agentId === null) ?? allTurns[0]
+      const lastSteps = last === undefined ? [] : stepsByTurn.get(last.id) ?? []
+      const lastCalls = lastSteps.flatMap(s => s.toolIds.flatMap(id => callById.get(id) ?? []))
+      const lastFailed = lastCalls.filter(c => c.status === 'error' || c.status === 'denied').length
+      const lastOut = lastSteps.reduce((n, s) => n + (s.usage?.output ?? 0), 0)
+      const example =
+        last === undefined
+          ? 'Once you send a message, your own numbers appear here.'
+          : `Your last turn: ${plural(lastSteps.length, 'step', 'steps')}, ${plural(lastCalls.length, 'tool call', 'tool calls')}${lastFailed > 0 ? ` (${lastFailed} failed)` : ''}, ${formatTokens(lastOut)} tokens written${last.durationMs !== null ? `, ${formatDuration(last.durationMs)}` : ''}.`
+
+      return (
+        <Box flexDirection="column">
+          {section('The loop')}
+          {para('g-intro', 'Claude Code is a loop around a model. The model only reads and writes text; Claude Code runs everything else.')}
+          {term('g-1', '1. Turn.', 'You send a message. Everything Claude Code does until it answers you is one turn.')}
+          {term('g-2', '2. Step.', 'Claude Code sends the whole conversation to the model. The model writes text and may ask for tools. One request and its answer is one step.')}
+          {term('g-3', '3. Permission check.', 'Before each tool runs, Claude Code checks your settings, hooks and permission mode: allowed, asked, or denied.')}
+          {term('g-4', '4. Tool call.', 'Claude Code runs the tool (read a file, run a command, search the web…) and adds its result to the conversation.')}
+          {term('g-5', '5. Again.', 'With the results, Claude Code starts a new step. The turn ends when a step answers without asking for tools.')}
+          {para('g-example', example, true)}
+
+          {section('Reading the timeline')}
+          {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied.')}
+          {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
+          {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
+          {term('g-s4', 'Colors', 'are kept for what needs attention: yellow waits, red failed or was refused. Routine details are dim.')}
+
+          {section('Words')}
+          {term('g-w1', 'Token.', 'The unit a model reads and writes, roughly three quarters of a word. Cost and limits are counted in tokens.')}
+          {term('g-w2', 'Context.', 'Everything the model reads at a step: instructions, the conversation, tool results. It grows step after step; when it is nearly full, Claude Code compacts it into a summary.')}
+          {term('g-w3', 'Cache.', 'The part of the context the model already read on an earlier step. Reading it again is cheaper and faster.')}
+          {term('g-w4', 'Effort.', 'How much the model is asked to think before it writes.')}
+          {term('g-w5', 'Permission rule.', 'A line in your settings, such as Bash(git:*), that allows or denies matching tool calls without asking.')}
+          {term('g-w6', 'Hook.', 'A script from your settings or from a plugin that runs around a tool call and can allow, deny or change it.')}
+          {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
+          {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task. It has its own turns, steps and tool calls, shown as Subagent turns.')}
+          {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
+          {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
+
+          {section('What Glass Box cannot see')}
+          {para('g-limits', 'The model’s private reasoning, how a server tool worked inside (only its input and result reach the transcript), and anything that happened before Glass Box loaded. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
         </Box>
       )
     }
@@ -786,7 +1031,7 @@ export const register: Register = on => {
             ].join(' · ')}
           </Text>
         </Box>
-        {current === 'stats' ? renderStats() : renderTimeline()}
+        {current === 'stats' ? renderStats() : current === 'guide' ? renderGuide() : renderTimeline()}
       </Box>
     )
 
@@ -794,7 +1039,12 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
         {allTurns.length === 0 && orphans.length === 0 && (
-          <Text dimColor>Nothing yet: send a prompt and watch it unfold here.</Text>
+          <Box flexDirection="column" {...fit(0)}>
+            <Text dimColor wrap="wrap">
+              Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
+            </Text>
+            <Text dimColor wrap="wrap">New to this? Open How it works (press 3 while the pane has the keyboard).</Text>
+          </Box>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}
         {orphans.length > 0 && (

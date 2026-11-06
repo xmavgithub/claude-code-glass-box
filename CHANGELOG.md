@@ -13,6 +13,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   time per tool; what the permission checks came to and which settings rules
   allowed the most calls; model steps, time in the model against time in
   tools, output tokens, peak context and cache share, stop reasons, models.
+- **How it works** tab: the agent loop in five steps with the numbers of your
+  last turn, a legend of marks and colors, a glossary, and what Glass Box
+  cannot see.
+- **Server tools**, such as the advisor, get their own row under their step:
+  duration, model (from the result, or the `advisorModel` in your settings),
+  and, in the open step, their input and their result read from the
+  transcript. Stats counts them too.
+- Plain-language explanations: each permission verdict is told as a sentence
+  ("Allowed without asking: your settings contain the rule …"), each open
+  step says what was sent to which model, and an empty pane explains what
+  will appear.
 
 ### Changed
 
@@ -27,8 +38,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Paths are relative to the project (home as `~`), MCP tools show their own
   name and their server, and an MCP call's summary is its first argument
   instead of raw JSON.
-- Steps show output tokens; the context size moves to the turn's header, and
-  the model only where it changes.
+- Steps show the tokens the model wrote and why it stopped in words ("asked
+  for 3 tools", "answered"); the context size moves to the turn's header, and
+  the model only where it changes. No abbreviations left in the pane.
 
 ## [0.2.1] - 2026-11-06
 

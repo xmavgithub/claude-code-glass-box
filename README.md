@@ -42,12 +42,47 @@ for what needs attention (failures, denials, a call waiting for approval);
 routine verdicts are drawn dim. Paths are shown relative to the project, the
 home folder as `~`, and MCP tools by their own name followed by their server.
 
+## How Claude Code works, in one minute
+
+Claude Code is a loop around a model. The model only reads and writes text;
+Claude Code does everything else.
+
+1. **Turn.** You send a message. Everything Claude Code does until it answers
+   you is one turn.
+2. **Step.** Claude Code sends the whole conversation to the model. The model
+   writes text and may ask for tools. One request and its answer is one step.
+   The model may also consult **server tools** the API runs by itself, such as
+   the advisor (a second model it asks for a review or a plan).
+3. **Permission check.** Before each tool runs, Claude Code checks your
+   settings, your hooks and the permission mode: the call is allowed, asked
+   about, or denied.
+4. **Tool call.** Claude Code runs the tool (reads a file, runs a command,
+   searches the web…) and adds its result to the conversation.
+5. **Again.** With the results, Claude Code starts a new step. The turn ends
+   when a step answers without asking for tools.
+
+Glass Box draws exactly this loop, live, and its **How it works** tab tells it
+with your own numbers, plus a legend and a short glossary.
+
 ## What it shows
+
+The pane has three tabs (hotkeys `1`, `2`, `3` while it has the keyboard):
+
+- **Timeline**: every turn, step, server tool and tool call, as below.
+- **Stats**: the session at a glance: calls, failures and time per tool; what
+  the permission checks came to and which rules allowed the most; time in the
+  model against time in tools, tokens, context and cache, stop reasons.
+- **How it works**: the loop above, a legend of the marks and colors, and a
+  glossary (token, context, cache, effort, permission rule, hook, auto mode,
+  subagent, MCP tool, server tool).
+
+In the Timeline:
 
 | Level | What you see | Expanded |
 | --- | --- | --- |
 | **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome | Its steps |
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
+| **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
 | **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), main argument | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
@@ -117,7 +152,10 @@ not installed.
 
 - Extended thinking is not shown yet (see the roadmap).
 - Server-side tools such as the advisor run inside the model request: Glass Box
-  lists them on their step but cannot show their input or output.
+  shows their input and result as the transcript keeps them, read back once
+  the step is over, but not how they worked inside. The advisor's model is the
+  one its result names or, failing that, the one your settings name; the API
+  does not otherwise say which model answered.
 - The mod API it builds on is in early access and may change between Claude
   Code releases.
 

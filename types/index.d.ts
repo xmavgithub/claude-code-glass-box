@@ -1,5 +1,5 @@
 /** The pane's tabs. */
-export type View = 'timeline' | 'stats'
+export type View = 'timeline' | 'stats' | 'guide'
 
 /** The state of a timeline item: a turn, a step or a tool call. */
 export type CallStatus = 'running' | 'ok' | 'error' | 'denied'
@@ -44,9 +44,27 @@ export type Step = {
   /** The tool_use_ids of the tool calls this step asked for, in order. */
   toolIds: string[]
   /** Tools the API ran itself inside the request (the advisor, for one). */
-  serverTools: string[]
+  serverTools: ServerTool[]
   stopReason: string | null
   usage: Usage | null
+}
+
+/**
+ * A tool the model API ran itself, inside a step (the advisor, for one).
+ * Claude Code runs nothing for it: no permission check, no tool call.
+ */
+export type ServerTool = {
+  /** The server tool call's id, as its result block names it. */
+  id: string
+  name: string
+  /** Its arguments as JSON, clipped. */
+  input: string
+  startedAt: number
+  durationMs: number | null
+  /** Its result as the transcript keeps it, clipped; null until read. */
+  output: string | null
+  /** A model named in its result block, when the API sends one. */
+  model: string | null
 }
 
 /** A tool call the engine ran. */
