@@ -4,125 +4,82 @@ All notable changes to Glass Box are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Glass Box is in development towards 1.0: there are no releases yet, and
+everything below is on `main`. 1.0 will be released when the criteria in
+[ROADMAP.md](ROADMAP.md#10) are met.
+
 ## [Unreleased]
 
 ### Added
 
-- **Instructions** tab (hotkey `3`; How it works moves to `4`): what the model
-  is told before it reads the conversation.
-  - The **system prompt**, section by section, with each section's size, text,
-    and whether it is shared (the same for everyone, cached across users) or
-    yours; one entry per kind of prompt (main loop, subagents), with model,
-    output style and tool count (`prompt.compose`).
-  - What goes **in front of the first message**: the context blocks
-    (`claudeMd`, the date…) and the instruction files behind `claudeMd`,
-    with their kind and which file imported them (`prompt.context`).
-  - The **tools offered**: how many are loaded in full, the size of their
-    descriptions, and which wait behind ToolSearch, by provider
-    (`tool.describe`).
-  - The **skills loaded** in the session, with source, size and text
-    (`skill.prompt`).
-- Glossary entries for system prompt, instruction files, skill and
-  ToolSearch.
+#### The pane and its tabs
 
-### Fixed
+- A live pane beside the chat, opened at session start on a wide terminal and
+  with `/glass-box` anywhere. Four tabs (hotkeys `1` to `4` while the pane has
+  the keyboard) and a **Clear** button (`c`).
+- **Timeline**: every turn (your message, or a subagent's prompt), every step
+  (one request to the model), every server tool and every tool call, as they
+  happen. The newest turn is open; turns and steps open and close on a click.
+- **Stats**: calls, failures and time per tool; what the permission checks
+  came to and which settings rules allowed the most calls; what was added to
+  the context, by source; time in the model against time in tools, output
+  tokens, peak context and cache share, stop reasons, models.
+- **Instructions**: what the model is told before it reads the conversation.
+  The system prompt section by section, shared or yours, with size and text
+  (`prompt.compose`); the blocks in front of the first message and the
+  CLAUDE.md files behind them, with their kind and imports
+  (`prompt.context`); the tools offered, loaded in full or behind ToolSearch,
+  by provider (`tool.describe`); the skills loaded (`skill.prompt`).
+- **How it works**: the agent loop in five steps with the numbers of your last
+  turn, a legend of marks and colors, a glossary, and what Glass Box cannot
+  see.
 
-- Long lines no longer wrap over many rows on VS Code and the desktop app,
-  which wrap styled text instead of truncating it: Glass Box now cuts every
-  line to the pane's width itself (in the narrower proportional font of
-  those surfaces, about 1.6 characters per cell), ending it with "…". A long command takes
-  one line; its full text is in the details of its open step.
+#### What the Timeline shows
 
-## [0.4.0] - 2026-11-06
+- **Steps**: model and effort (where they change), duration, tokens written,
+  why the model stopped in words ("asked for 3 tools", "answered"), the first
+  line of what it wrote; open, the full text and the token breakdown
+  (context, cached, written, new, output).
+- **Tool calls**, one line each: status, tool, duration, permission outcome,
+  main argument; open with their step: the full input, the output as the
+  model read it, and the verdict told as a sentence with its technical
+  fields.
+- **Permission verdicts** read as outcomes: the settings rule or hook that
+  allowed a call, "approved", "rejected" or "awaiting approval" for an ask,
+  "denied" with its rule (`tool.check`).
+- **Rewritten calls**: when a PreToolUse hook changes a call's arguments, the
+  call is marked `rewritten` and shows both versions
+  (`git status → rtk git status`), from the hooks' own answer
+  (`classic.PreToolUse`).
+- **Added to the context**: under each turn, everything Claude Code put in
+  front of the model besides your message: its reminders and listings,
+  mentioned files, settings hooks' output by event, plugins' context, with
+  size and full text (`prompt.attachment`).
+- **Server tools** such as the advisor get their own row: duration, model
+  (from the result, or the `advisorModel` in your settings), input and
+  result read from the transcript.
 
-### Added
+#### Clarity
 
-- **Rewritten calls.** When a PreToolUse hook (from your settings or a plugin)
-  changes a tool call's arguments, the call is marked `rewritten` and its line
-  shows both versions (`git status → rtk git status`); its details list every
-  changed argument. Read from the hooks' own answer (`classic.PreToolUse`).
-- **Added to the context.** Under each turn, everything Claude Code put in
-  front of the model besides your message: its own reminders and listings,
-  files you mentioned, settings hooks' output (by event, such as
-  SessionStart) and plugins' context, with size and full text
-  (`prompt.attachment`). Stats sums it up by source.
-- **Clear** button (hotkey `c`) to empty the timeline.
-- [ROADMAP.md](ROADMAP.md): vision, principles and milestones.
+- Plain words everywhere, no abbreviations; color kept for what needs
+  attention, routine details dim.
+- Paths relative to the project, home as `~`; MCP tools by their own name and
+  server.
+- Every line cut to the pane's width with "…" on every surface, a long
+  command on one line, its full text in the details.
 
-## [0.3.0] - 2026-11-06
+#### Robustness
 
-### Added
+- Glass Box only observes: every hook passes its event on untouched, and a
+  failure of its own never touches the session.
+- A step interrupted with Esc closes as "no response" instead of staying
+  "running".
+- State is bounded (turns, calls, context items, skills) and long texts are
+  clipped.
 
-- Tabs inside the pane: **Timeline** and **Stats** (hotkeys `1` and `2` while
-  the pane has the keyboard). Stats sums up the session: calls, failures and
-  time per tool; what the permission checks came to and which settings rules
-  allowed the most calls; model steps, time in the model against time in
-  tools, output tokens, peak context and cache share, stop reasons, models.
-- **How it works** tab: the agent loop in five steps with the numbers of your
-  last turn, a legend of marks and colors, a glossary, and what Glass Box
-  cannot see.
-- **Server tools**, such as the advisor, get their own row under their step:
-  duration, model (from the result, or the `advisorModel` in your settings),
-  and, in the open step, their input and their result read from the
-  transcript. Stats counts them too.
-- Plain-language explanations: each permission verdict is told as a sentence
-  ("Allowed without asking: your settings contain the rule …"), each open
-  step says what was sent to which model, and an empty pane explains what
-  will appear.
+#### Project
 
-### Changed
+- README, MIT license, contributing guide, code of conduct, security policy,
+  issue and PR templates, CI, roadmap.
 
-- A denser, calmer layout. Each tool call is one line, and its details open
-  with its step: only turns and steps have a toggle, so the desktop and
-  VS Code panes no longer show a button on every row.
-- Lines are truncated with "…" to the pane's width on the terminal instead of
-  running past its edge.
-- Verdicts read as outcomes: an ask shows "approved", "rejected" or "awaiting
-  approval"; routine verdicts are dim and color is kept for what needs
-  attention.
-- Paths are relative to the project (home as `~`), MCP tools show their own
-  name and their server, and an MCP call's summary is its first argument
-  instead of raw JSON.
-- Steps show the tokens the model wrote and why it stopped in words ("asked
-  for 3 tools", "answered"); the context size moves to the turn's header, and
-  the model only where it changes. No abbreviations left in the pane.
-
-## [0.2.1] - 2026-11-06
-
-### Fixed
-
-- A step whose response is interrupted (Esc during a turn) no longer stays
-  marked as running: it closes as "no response".
-
-## [0.2.0] - 2026-11-06
-
-### Added
-
-- **Turns**: tool calls are grouped under the prompt that caused them, for the
-  main loop and for each subagent, with duration and outcome.
-- **Model steps**: every request to the model inside a turn, with the text it
-  wrote, model and effort, tokens (context in, output, cache), duration, stop
-  reason and server-side tools such as the advisor.
-- **Permission verdicts**: each tool call shows who allowed, asked about or
-  denied it: the settings rule, the hook, the setting or the plugin.
-- `/glass-box` command to open the pane.
-- Open source project files: README, license, contributing guide, code of
-  conduct, security policy, issue and PR templates, CI.
-
-### Changed
-
-- Renamed from `tool-calls-panel` to **Glass Box**; the interface is in English.
-- Tool calls are linked to the step that asked for them by `tool_use_id`.
-
-## 0.1.0 - 2026-11-06
-
-### Added
-
-- First version, never published on its own: a pane listing every tool call with status, duration,
-  main argument, and expandable input and output.
-
-[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/xmavgithub/claude-code-glass-box/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/xmavgithub/claude-code-glass-box/releases/tag/v0.2.0
+[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/commits/main

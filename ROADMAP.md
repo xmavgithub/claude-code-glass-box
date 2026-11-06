@@ -30,18 +30,20 @@ Every item below is held to these.
 
 ## Where we are
 
-**0.4.0**: the loop itself, and what changes it. Turns, steps, server tools
-such as the advisor, tool calls and their permission verdicts, in a Timeline;
-calls a hook rewrote, with both versions; everything added to the model's
-context besides your message, by source; a Stats tab; a How it works tab with
-a legend and a glossary.
+In development towards 1.0, on `main` (no releases before 1.0). Done so far:
+the loop itself and what changes it (turns, steps, server tools such as the
+advisor, tool calls and their permission verdicts, calls a hook rewrote,
+everything added to the model's context), and what the model is told (the
+system prompt, the first message's context blocks and CLAUDE.md files, the
+tools offered, the skills loaded). Four tabs: Timeline, Stats, Instructions,
+How it works.
 
 ## Next
 
 Each milestone answers one question about the session. Items name the Claude
 Code events they build on.
 
-### 0.4: What actually ran, and what was added
+### What actually ran, and what was added
 
 > "Is what ran what the model asked for? What else did the model read?"
 
@@ -56,7 +58,7 @@ Code events they build on.
   can change arguments before Glass Box sees them: compare with the step's
   `toolUses` to catch those too.
 
-### 0.5: What the model is told
+### What the model is told
 
 > "Which instructions and tools did the model have?"
 
@@ -68,7 +70,7 @@ Code events they build on.
 - [x] **Tools on offer.** Which tools the model sees in full and which wait
   behind ToolSearch, from `tool.describe`.
 
-### 0.6: Resources
+### Resources
 
 > "How full is the context, and what does the session cost?"
 
@@ -77,7 +79,7 @@ Code events they build on.
 - [ ] **Compactions.** Each compaction as a timeline row: what triggered it,
   how much context it freed (`session.compact`).
 
-### 0.7: Agents
+### Agents
 
 > "Who did the work?"
 
@@ -86,7 +88,7 @@ Code events they build on.
 - [ ] **Agent tree.** Nested agents shown as a tree, each with its own steps
   and tool calls.
 
-### 0.8: Reasoning (experimental)
+### Reasoning (experimental)
 
 > "Why did the model do that?"
 

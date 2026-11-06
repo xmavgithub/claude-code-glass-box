@@ -168,10 +168,11 @@ not installed.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held
-to, and the milestones ahead, from showing rewritten tool calls and injected
-context (0.4) to the active instructions, the context window and cost,
-subagents and the model's reasoning. Discussion and pull requests are welcome.
+Glass Box is in development towards 1.0, with no releases before then. See
+[ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held to,
+what is done, and the milestones ahead: the context window and cost,
+subagents tied to the calls that started them, and the model's reasoning.
+Discussion and pull requests are welcome.
 
 ## Development
 
