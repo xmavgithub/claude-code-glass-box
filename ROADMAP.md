@@ -99,6 +99,41 @@ Code events they build on.
   per step. What arrives depends on the model and may be summarized or empty;
   the pane will say which.
 
+### Everything the loop exposes
+
+> "Is any part of the loop still out of sight?"
+
+An inventory of the events Claude Code exposes (47 engine events, 67
+operations on `$`) against what Glass Box records. In order of value:
+
+- [ ] **Where each message came from.** Your Enter, a background task's
+  notification, another session, a scheduled task, a plugin, a channel such
+  as Slack, the phone: the engine's own `origin`, in place of reading the
+  frame around the text. And when a hook changed your message before the
+  model read it (`prompt.submit`).
+- [ ] **Plugins in the loop.** Which plugins and mods are loaded, from where,
+  and what each one hooks and calls: who can change what happens
+  (`plugin.register`).
+- [ ] **Messages between agents.** What an agent sends to another
+  (SendMessage) and what arrives from outside (`session.send`,
+  `session.receive`).
+- [ ] **Agents on offer.** The agent types the model is offered, beside the
+  tools in the Prompt tab (`agent.offer`).
+- [ ] **Commands and settings.** The slash commands you run and the
+  `/config` rows that change, as Timeline rows (`command.run`, `config.set`).
+- [ ] **Telemetry.** What Claude Code logs and where it sends it, kept in the
+  pane only (`telemetry.log`, `telemetry.mark`).
+- [ ] **What other plugins do.** Their model calls, MCP calls, network
+  requests and processes, through `$` (`model.complete`, `mcp.call`,
+  `http.fetch`, `process.run`).
+- [ ] **Out of reach, said.** The README lists what Glass Box leaves out and
+  why: drawing (`ui.*`), the prompt box (`prompt.fill`, `prompt.suggest`,
+  `prompt.edit`, `prompt.change`, `prompt.autocomplete`), command and setting
+  descriptions, the engine's lifecycle (`engine.create`, `session.end`,
+  surfaces attaching), the clock, stores, state and environment;
+  `prompt.section` and `prompt.mention`, covered by `prompt.compose` and
+  `prompt.attachment`; `attribution.text`.
+
 ## Later
 
 - [x] A Clear button.
