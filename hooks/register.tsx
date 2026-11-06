@@ -1583,9 +1583,36 @@ export const register: Register = on => {
       )
     }
 
-    const bar = (percent: number, width: number) => {
-      const filled = Math.round((Math.min(100, Math.max(0, percent)) / 100) * width)
-      return `${'█'.repeat(filled)}${'░'.repeat(width - filled)}`
+    /**
+     * A meter drawn as two colored boxes of a set width in cells, not as block
+     * characters: a proportional font draws those as uneven squares. Blue
+     * while there is room, yellow from 70%, red from 90%.
+     */
+    const barRow = (key: string, label: string, percent: number, cells: number, value: string, labelWidth: number) => {
+      const p = Math.min(100, Math.max(0, percent))
+      const filled = Math.round((p / 100) * cells)
+      const color = p >= 90 ? 'error' : p >= 70 ? 'warning' : 'suggestion'
+
+      return (
+        <Box key={key} flexDirection="row" paddingLeft={2} gap={1}>
+          <Text>{e.surface === 'terminal' ? label.padEnd(labelWidth) : label}</Text>
+          <Box flexDirection="row">
+            {filled > 0 && (
+              <Box key={`${key}-fill`} width={filled} backgroundColor={color}>
+                <Text>{' '.repeat(filled)}</Text>
+              </Box>
+            )}
+            {filled < cells && (
+              <Box key={`${key}-rest`} width={cells - filled} backgroundColor="inactive">
+                <Text>{' '.repeat(cells - filled)}</Text>
+              </Box>
+            )}
+          </Box>
+          <Box {...fit(labelWidth + cells + 4)}>
+            {seg(room(labelWidth + cells + 4), [{ text: value, dim: true }])}
+          </Box>
+        </Box>
+      )
     }
 
     const until = (iso: string) => {
@@ -1610,11 +1637,13 @@ export const register: Register = on => {
           {para('c-intro', 'Everything the model reads at each step must fit in its context window: instructions, tools, the conversation, tool results. When it is nearly full, Claude Code compacts the conversation.', true)}
           {r === null && para('c-none', 'Not measured yet: the figures arrive with the next response from the model.', true)}
           {r !== null &&
-            line(
+            barRow(
               'c-fill',
-              pct !== null ? `${bar(pct, 20)} ${pct}%` : 'filled',
-              `${r.contextTokens !== null ? formatTokens(r.contextTokens) : '?'} of ${formatTokens(r.window)} tokens`,
-              26,
+              'used',
+              pct ?? 0,
+              20,
+              `${pct !== null ? `${pct}% · ` : ''}${r.contextTokens !== null ? formatTokens(r.contextTokens) : '?'} of ${formatTokens(r.window)} tokens`,
+              4,
             )}
 
           {section('What fills it')}
@@ -1687,11 +1716,13 @@ export const register: Register = on => {
           {(r === null || r.rateLimits.length === 0) && para('c-rl-none', 'None reported yet.', true)}
           {r !== null &&
             r.rateLimits.map(l =>
-              line(
+              barRow(
                 `c-rl-${l.kind}`,
                 WINDOW_LABEL[l.kind] ?? l.kind,
-                `${bar(l.percentUsed, 10)} ${l.percentUsed}%${l.resetsAt !== null ? ` · resets in ${until(l.resetsAt)} (${formatTime(Date.parse(l.resetsAt)).slice(0, 5)})` : ''}`,
+                l.percentUsed,
                 10,
+                `${l.percentUsed}%${l.resetsAt !== null ? ` · resets in ${until(l.resetsAt)} (${formatTime(Date.parse(l.resetsAt)).slice(0, 5)})` : ''}`,
+                7,
               ),
             )}
 

@@ -544,15 +544,26 @@ test('Context shows the window, what fills it, cost per turn, rate limits and co
 
   await ui.press({ key: 'v:context' })
   const all = await texts(ui)
-  expect(has(all, /^█░{19} 6% +61\.5k of 1\.00M tokens$/)).toBe(true)
+  expect(all).toContain('6% · 61.5k of 1.00M tokens')
+  // The meter is two boxes of set widths: 1 of 20 cells filled at 6%.
+  expect(await ui.find({ key: 'c-fill-fill' })).toBeDefined()
+  expect(await ui.find({ key: 'c-fill-rest' })).toBeDefined()
   expect(has(all, /^System prompt +12\.0k tokens · 1%$/)).toBe(true)
   expect(all).toContain('Auto-compaction is on: it runs at about 920.0k tokens.')
   expect(has(all, /^User +900 tokens · ~\/\.claude\/CLAUDE\.md$/)).toBe(true)
   expect(has(all, /^ctx +500 tokens · 2 tools, 1 loaded$/)).toBe(true)
   expect(has(all, /^this session +\$1\.42$/)).toBe(true)
   expect(has(all, /^\d\d:\d\d +\$0\.42 · “refactor the parser”$/)).toBe(true)
-  expect(has(all, /^5 hours +█{4}░{6} 38% · resets in 2h (29|30)m/)).toBe(true)
+  expect(has(all, /^38% · resets in 2h (29|30)m \(\d\d:\d\d\)$/)).toBe(true)
   await ui.unmount()
+
+  // The meter's boxes are drawn by every surface.
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    const other = await $.ui.mount({ ...PANE, surface })
+    expect(await other.find({ key: 'c-fill-fill' })).toBeDefined()
+    expect(await other.find({ key: 'c-rl-five_hour-fill' })).toBeDefined()
+    await other.unmount()
+  }
 })
 
 test('Clear empties the timeline', async ($, on) => {
