@@ -26,16 +26,17 @@ everything below is on `main`. 1.0 will be released when the criteria in
   came to and which settings rules allowed the most calls; what was added to
   the context, by source; time in the model against time in tools, output
   tokens, peak context and cache share, stop reasons, models.
-- **Prompt**: what the model is told before it reads the conversation.
-  The system prompt section by section, shared or yours, with size and text
+- **Prompt**: what the model is told before it reads the conversation. The
+  system prompt section by section, shared or yours, with size and text
   (`prompt.compose`); the blocks in front of the first message and the
-  CLAUDE.md files behind them, with their kind and imports
-  (`prompt.context`); the tools offered, loaded in full or behind ToolSearch,
-  by provider (`tool.describe`); the plugins in the loop: mods with their
-  tier, provenance and what they hook and call on `$` (`plugin.register`),
-  other plugins by the tools, skills and permission checks they provide,
-  with the limit said (a mod loaded before Glass Box shows only by what it
-  does); the skills loaded (`skill.prompt`).
+  CLAUDE.md files behind them, with their kind and imports (`prompt.context`);
+  the tools offered, loaded in full or behind ToolSearch, by provider
+  (`tool.describe`); the agent types the model can start, with when to use
+  each and any a plugin kept from it (`agent.offer`); the plugins in the loop:
+  mods with their tier, provenance and what they hook and call on `$`
+  (`plugin.register`), other plugins by the tools, agent types, skills and
+  permission checks they provide, with the limit said (a mod loaded before
+  Glass Box shows only by what it does); the skills loaded (`skill.prompt`).
 - **Context**: how full the context window is and what fills it, as
   /context counts it (system prompt, tools, memory files, MCP servers,
   messages, free space, the auto-compaction threshold), with a Refresh

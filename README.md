@@ -77,9 +77,10 @@ beside the session's counts, a **Guide** button (`g`):
 - **Prompt**: what the model is told before it reads the conversation.
   The system prompt section by section (shared or yours, size, text); the
   blocks in front of the first message and the CLAUDE.md files behind them;
-  the tools offered, loaded in full or behind ToolSearch; the plugins in the
-  loop (mods with what they hook and call, other plugins by the tools,
-  skills and permission checks they provide); the skills loaded.
+  the tools offered, loaded in full or behind ToolSearch; the agent types the
+  model can start, and any a plugin kept from it; the plugins in the loop
+  (mods with what they hook and call, other plugins by the tools, agent
+  types, skills and permission checks they provide); the skills loaded.
 - **Context**: how full the context window is and what fills it (system
   prompt, tools, memory files, MCP servers, messages, free space), as
   /context counts it; the session's cost and each recent turn's; the
@@ -150,6 +151,7 @@ not installed.
 
 | Event | What Glass Box records |
 | --- | --- |
+| `agent.offer` | Each agent type offered to the model: its source and provider, when to use it, and whether a plugin kept it from the model |
 | `session.send` / `session.receive` | Messages between agents and sessions: recipient or sender, delivered or not, taken or changed by a plugin, text |
 | `plugin.register` | A mod joining the chain after Glass Box: its tier, provenance, version, the events it hooks and what it calls on `$` |
 | `prompt.submit` | Every message entering the session: where it came from (`origin`), the text a hook beneath changed it to, or why it was stopped |

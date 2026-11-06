@@ -117,7 +117,7 @@ operations on `$`) against what Glass Box records. In order of value:
 - [x] **Messages between agents.** What an agent sends to another
   (SendMessage) and what arrives from outside (`session.send`,
   `session.receive`).
-- [ ] **Agents on offer.** The agent types the model is offered, beside the
+- [x] **Agents on offer.** The agent types the model is offered, beside the
   tools in the Prompt tab (`agent.offer`).
 - [ ] **Commands and settings.** The slash commands you run and the
   `/config` rows that change, as Timeline rows (`command.run`, `config.set`).

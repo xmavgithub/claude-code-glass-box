@@ -146,6 +146,19 @@ export type Letter = {
   rewritten: boolean
 }
 
+/** An agent type offered to the model, as `agent.offer` raised it. */
+export type OfferedAgent = {
+  agent: string
+  /** When to use it, as its definition states; clipped. */
+  description: string
+  /** Where its definition came from: built-in, plugin, a settings source. */
+  source: string
+  /** Who provides it: `engine` for a built-in, else the plugin. */
+  provider: string
+  /** False when a plugin kept it from the model. */
+  offered: boolean
+}
+
 /** A hooks module (a mod) joining the chain, as the engine scanned it. */
 export type ModInfo = {
   name: string
@@ -426,6 +439,7 @@ declare module 'claude-code' {
       messages: Shaped<Submission[]>
       mods: Shaped<ModInfo[]>
       mail: Shaped<Letter[]>
+      agentTypes: Shaped<OfferedAgent[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

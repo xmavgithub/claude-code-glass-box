@@ -899,3 +899,30 @@ test('messages between agents are listed under the turn of the loop that sent or
     await ui.unmount()
   }
 })
+
+test('the Prompt tab lists the agent types offered to the model, and one a plugin kept from it', async ($, on) => {
+  on('agent.offer', (_, e) => ({ isOffered: e.agent !== 'Plan' }))
+
+  await $.agent.offer({ agent: 'Explore', description: 'Fast read-only search across a codebase.', source: 'built-in', provider: { plugin: 'engine', tier: 'core' } } as never)
+  await $.agent.offer({ agent: 'Plan', description: 'Designs an implementation plan.', source: 'built-in', provider: { plugin: 'engine', tier: 'core' } } as never)
+  await $.agent.offer({ agent: 'reviewer', description: 'Reviews a diff.', source: 'plugin', provider: { plugin: 'code-tools', tier: 'user' } } as never)
+  // Raised again on the next request, unchanged: nothing more is written.
+  await $.agent.offer({ agent: 'Explore', description: 'Fast read-only search across a codebase.', source: 'built-in', provider: { plugin: 'engine', tier: 'core' } } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'v:instructions' })
+    const all = await texts(ui)
+    expect(all).toContain('Agents on offer')
+    expect(all).toContain('Explore · built-in')
+    expect(all).toContain('Plan · built-in · kept from the model by a plugin')
+    expect(all).toContain('reviewer · plugin, code-tools')
+    expect(all).toContain('code-tools · 1 agent type')
+
+    await ui.press({ key: 'n:a:Explore' })
+    expect(await texts(ui)).toContain('Fast read-only search across a codebase.')
+    await ui.press({ key: 'n:a:Explore' })
+    await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})

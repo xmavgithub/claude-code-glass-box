@@ -10,6 +10,7 @@ import type {
   Injection,
   Letter,
   ModInfo,
+  OfferedAgent,
   OfferedTool,
   PromptSnapshot,
   Resources,
@@ -97,6 +98,10 @@ const MAX_MESSAGES = 100
 // The hooks modules that joined the chain after Glass Box, as scanned.
 const mods = atom({ plugin: 'glass-box', key: 'mods' } as const, [], { shape: 'mods-1' })
 const MAX_MODS = 50
+// The agent types offered to the model, and the last signature of each.
+const agentTypes = atom({ plugin: 'glass-box', key: 'agentTypes' } as const, [], { shape: 'agentTypes-1' })
+const MAX_AGENT_TYPES = 100
+const agentTypeSeen = new Map<string, string>()
 // Messages between agents and sessions, sent and received.
 const mail = atom({ plugin: 'glass-box', key: 'mail' } as const, [], { shape: 'mail-1' })
 const MAX_MAIL = 100
@@ -1180,6 +1185,29 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // Each agent type offered to the model, in its listing or at dispatch; a
+  // plugin may keep one from it. Raised on every request: written on change.
+  on('agent.offer', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const record: OfferedAgent = {
+        agent: e.agent,
+        description: clip(e.description, MAX_ANSWER),
+        source: e.source,
+        provider: e.provider.plugin,
+        offered: answer.isOffered,
+      }
+      const signature = `${record.source}|${record.provider}|${record.offered}|${record.description.length}`
+      if (agentTypeSeen.get(record.agent) === signature) return
+      agentTypeSeen.set(record.agent, signature)
+      await update($, agentTypes, list =>
+        [...list.filter(a => a.agent !== record.agent), record].slice(-MAX_AGENT_TYPES),
+      )
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // The permission verdict: which rule, hook, setting or plugin decided.
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
@@ -1266,7 +1294,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1279,6 +1307,7 @@ export const register: Register = on => {
         read($, messages),
         read($, mods),
         read($, mail),
+        read($, agentTypes),
       ])
 
     const columns = e.props.bodyColumns
@@ -2506,10 +2535,10 @@ export const register: Register = on => {
     // --- Plugins in the loop: who besides Claude Code can act in the session.
 
     const renderPlugins = () => {
-      type Seen = { mod: ModInfo | null; tools: string[]; skills: Set<string>; verdicts: number }
+      type Seen = { mod: ModInfo | null; tools: string[]; skills: Set<string>; agents: string[]; verdicts: number }
       const seen = new Map<string, Seen>()
       const of = (name: string) => {
-        const entry = seen.get(name) ?? { mod: null, tools: [], skills: new Set<string>(), verdicts: 0 }
+        const entry = seen.get(name) ?? { mod: null, tools: [], skills: new Set<string>(), agents: [], verdicts: 0 }
         seen.set(name, entry)
         return entry
       }
@@ -2522,6 +2551,7 @@ export const register: Register = on => {
       }
       for (const load of skillList) if (load.plugin !== null) of(load.plugin).skills.add(load.skill)
       for (const verdict of verdictList) if (verdict.plugin !== null) of(verdict.plugin).verdicts += 1
+      for (const type of agentTypeList) if (type.provider !== 'engine') of(type.provider).agents.push(type.agent)
       const rows = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 
       return (
@@ -2529,7 +2559,7 @@ export const register: Register = on => {
           {section('Plugins in the loop')}
           {para(
             'n-plugins',
-            'Who besides Claude Code acts in this session. Mods (hooks modules) are listed with what they hook and call, as the engine scanned them; other plugins by what Glass Box saw them do: the tools they provide, the skills they load, the permission checks they decide.',
+            'Who besides Claude Code acts in this session. Mods (hooks modules) are listed with what they hook and call, as the engine scanned them; other plugins by what Glass Box saw them do: the tools and agent types they provide, the skills they load, the permission checks they decide.',
             true,
           )}
           {para(
@@ -2545,6 +2575,7 @@ export const register: Register = on => {
               p.mod !== null ? plural(p.mod.events.length, 'event hooked', 'events hooked') : null,
               p.tools.length > 0 ? plural(p.tools.length, 'tool', 'tools') : null,
               p.skills.size > 0 ? plural(p.skills.size, 'skill', 'skills') : null,
+              p.agents.length > 0 ? plural(p.agents.length, 'agent type', 'agent types') : null,
               p.verdicts > 0 ? plural(p.verdicts, 'permission check', 'permission checks') : null,
             ].filter(part => part !== null)
 
@@ -2572,6 +2603,7 @@ export const register: Register = on => {
                     )}
                   {p.tools.length > 0 && para(`n-pt-${name}`, `Tools: ${p.tools.join(', ')}.`, true)}
                   {p.skills.size > 0 && para(`n-ps-${name}`, `Skills loaded: ${[...p.skills].join(', ')}.`, true)}
+                  {p.agents.length > 0 && para(`n-pa-${name}`, `Agent types: ${p.agents.join(', ')}.`, true)}
                   {p.verdicts > 0 && para(`n-pv-${name}`, `Decided ${plural(p.verdicts, 'permission check', 'permission checks')} on tool calls.`, true)}
                 </Box>
               ),
@@ -2700,6 +2732,24 @@ export const register: Register = on => {
                       )
                     })}
                 </Box>
+              ),
+            )}
+
+          {section('Agents on offer')}
+          {para('n-agents', 'The kinds of subagent the model can start with its Agent tool, and when to use each, as their definitions say. A plugin can keep one from the model.', true)}
+          {agentTypeList.length === 0 && para('n-agents-none', 'Not recorded yet: agent types are listed when Claude Code next offers them to the model.', true)}
+          {[...agentTypeList]
+            .sort((a, b) => a.agent.localeCompare(b.agent))
+            .map(a =>
+              toggleRow(
+                `n:a:${a.agent}`,
+                0,
+                [
+                  { text: a.agent, bold: true },
+                  { text: ` · ${a.provider === 'engine' ? 'built-in' : `${a.source}, ${a.provider}`}`, dim: true },
+                  !a.offered && { text: ' · kept from the model by a plugin', color: 'warning' },
+                ],
+                () => para(`n-ad-${a.agent}`, a.description, true),
               ),
             )}
 
