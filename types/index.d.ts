@@ -121,6 +121,31 @@ export type Submission = {
   dropped: string | null
 }
 
+/**
+ * A message between agents or sessions: one an agent sent (SendMessage, or a
+ * plugin's `$.session.send`), or one that reached this session.
+ */
+export type Letter = {
+  id: string
+  at: number
+  direction: 'out' | 'in'
+  /** The loop that sent it (out) or that it is for (in); null for the main one. */
+  agentId: string | null
+  turnId: string | null
+  /** Out: whom it went to. In: who sent it, in words. */
+  peer: string
+  /** Who acted: `model` or `plugin` (out); the delivery's origin kind (in). */
+  kind: string
+  text: string
+  chars: number
+  /** Out: whether it reached the recipient's queue; null for one coming in. */
+  delivered: boolean | null
+  /** Out: why it was not delivered. In: why a plugin took it before it was queued. */
+  problem: string | null
+  /** In: a plugin changed the text before it was queued. */
+  rewritten: boolean
+}
+
 /** A hooks module (a mod) joining the chain, as the engine scanned it. */
 export type ModInfo = {
   name: string
@@ -400,6 +425,7 @@ declare module 'claude-code' {
       agents: Shaped<Spawn[]>
       messages: Shaped<Submission[]>
       mods: Shaped<ModInfo[]>
+      mail: Shaped<Letter[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

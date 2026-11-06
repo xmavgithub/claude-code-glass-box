@@ -856,3 +856,46 @@ test('the Prompt tab lists the plugins seen at work, and not plain MCP servers',
     await ui.unmount()
   }
 })
+
+test('messages between agents are listed under the turn of the loop that sent or received them', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.send', (_, e) =>
+    e.to === 'nobody' ? ({ isDelivered: false, reason: 'No agent named nobody' } as const) : ({ isDelivered: true } as const),
+  )
+  on('session.receive', (_, e) =>
+    e.text.includes('spam') ? { consumed: 'filtered as spam' } : { text: `${e.text} (checked)` },
+  )
+
+  await $.turn.start({ turnId: 'S1', text: 'research the API', agentId: 'A1' } as never)
+  await $.session.send({ to: 'team-lead', text: 'Found three endpoints.', origin: { kind: 'model' }, agentId: 'A1' } as never)
+  await $.turn.start({ turnId: 'T1', text: 'coordinate' })
+  await $.session.send({ to: 'researcher', text: 'Look at the auth flow.', origin: { kind: 'model' } } as never)
+  await $.session.send({ to: 'nobody', text: 'Hello?', origin: { kind: 'model' } } as never)
+  await $.session.receive({ origin: { kind: 'peer', teammate: 'researcher', isLocal: true }, text: 'Auth uses OAuth.' } as never)
+  await $.session.receive({ origin: { kind: 'unclassified' }, text: 'buy spam now' } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const all0 = await texts(ui)
+    expect(has(all0, /^✉ Messages between agents · 2 sent · 2 received · 2 not through$/)).toBe(true)
+
+    await ui.press({ key: 'm:T1' })
+    const all = await texts(ui)
+    expect(has(all, /^→ to researcher · sent by the model · .* · delivered$/)).toBe(true)
+    expect(all).toContain('Not delivered: No agent named nobody')
+    expect(has(all, /^← from researcher, of the team · peer · .* · changed by a plugin$/)).toBe(true)
+    expect(all).toContain('Auth uses OAuth. (checked)')
+    expect(all).toContain('Taken by a plugin before it was queued, so the model never read it: filtered as spam')
+    await ui.press({ key: 'm:T1' })
+
+    // The subagent's message sits under its own turn.
+    await ui.press({ key: 't:S1' })
+    await ui.press({ key: 'm:S1' })
+    expect(has(await texts(ui), /^→ to team-lead · sent by the model · /)).toBe(true)
+    await ui.press({ key: 'm:S1' })
+    await ui.press({ key: 't:S1' })
+    await ui.unmount()
+  }
+})

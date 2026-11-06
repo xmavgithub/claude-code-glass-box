@@ -8,6 +8,7 @@ import type {
   Compaction,
   ContextSnapshot,
   Injection,
+  Letter,
   ModInfo,
   OfferedTool,
   PromptSnapshot,
@@ -96,6 +97,9 @@ const MAX_MESSAGES = 100
 // The hooks modules that joined the chain after Glass Box, as scanned.
 const mods = atom({ plugin: 'glass-box', key: 'mods' } as const, [], { shape: 'mods-1' })
 const MAX_MODS = 50
+// Messages between agents and sessions, sent and received.
+const mail = atom({ plugin: 'glass-box', key: 'mail' } as const, [], { shape: 'mail-1' })
+const MAX_MAIL = 100
 // How soon a message sent to an idle session starts its turn, at most.
 const IDLE_START_MS = 30_000
 // The /context-style breakdown is estimated locally: at most this often.
@@ -511,6 +515,26 @@ function collect(value: unknown, key: string, out: string[] = [], depth = 0): st
   return out
 }
 
+/** Records a message between agents under the latest turn of its loop. */
+async function post(
+  $: EngineInterface,
+  agentId: string | null,
+  letter: Omit<Letter, 'id' | 'at' | 'agentId' | 'turnId' | 'chars'>,
+) {
+  const at = await now($)
+  const turn = [...(await read($, turns))].reverse().find(t => t.agentId === agentId)
+  const record: Letter = {
+    ...letter,
+    id: `${at}-${injectionSeq++}`,
+    at,
+    agentId,
+    turnId: turn?.id ?? null,
+    text: clip(letter.text, MAX_INJECTION_TEXT),
+    chars: letter.text.length,
+  }
+  await update($, mail, list => [...list, record].slice(-MAX_MAIL))
+}
+
 /**
  * What the transcript keeps of a step's thinking: its last model message,
  * when its tool calls show it is this step's, holds the thinking blocks as
@@ -647,6 +671,53 @@ export const register: Register = on => {
         refused: answer.refuse ?? null,
       }
       await update($, mods, list => [...list.filter(m => m.name !== record.name), record].slice(-MAX_MODS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // Messages between agents: one leaving for another agent or session.
+  on('session.send', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(() =>
+      post($, e.agentId ?? null, {
+        direction: 'out',
+        peer: e.to,
+        kind: e.origin.kind === 'plugin' ? `plugin ${e.origin.name}` : 'model',
+        text: e.text,
+        delivered: answer.isDelivered,
+        problem: answer.isDelivered ? null : answer.reason,
+        rewritten: false,
+      }),
+    )
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // And one arriving, before it is queued: a peer, a teammate, a relay, an
+  // external event. A plugin may take it (consumed) or change it.
+  on('session.receive', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(() => {
+      const origin = e.origin
+      const peer =
+        e.event !== undefined
+          ? `${e.event.source} (${e.event.kind})`
+          : 'teammate' in origin && typeof origin.teammate === 'string'
+            ? `${origin.teammate}, of the team`
+            : 'plugin' in origin && typeof origin.plugin === 'string'
+              ? `plugin ${origin.plugin}`
+              : ORIGIN[origin.kind]?.who ?? origin.kind
+
+      return post($, e.agentId ?? null, {
+        direction: 'in',
+        peer,
+        kind: origin.kind,
+        text: answer.text ?? e.text,
+        delivered: null,
+        problem: answer.consumed ?? null,
+        rewritten: answer.text !== undefined && answer.text !== e.text,
+      })
     })
 
     return answer
@@ -1195,7 +1266,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1207,6 +1278,7 @@ export const register: Register = on => {
         read($, agents),
         read($, messages),
         read($, mods),
+        read($, mail),
       ])
 
     const columns = e.props.bodyColumns
@@ -1870,6 +1942,7 @@ export const register: Register = on => {
             </Box>
           )}
           {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
+          {open && renderMail(`m:${turn.id}`, mailList.filter(l => l.turnId === turn.id), 2)}
           {open && (compactionsByTurn.get(turn.id) ?? []).map(c => compactionLine(c, 2))}
           {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
         </Box>
@@ -1886,6 +1959,61 @@ export const register: Register = on => {
           : `plugin (${item.event ?? 'context'})`
 
     const formatChars = (n: number) => `${formatTokens(n)} chars (~${formatTokens(Math.round(n / 4))} tokens)`
+
+    // Messages between agents for a turn: one line that opens on each, with
+    // its direction, the other end, what became of it and its text.
+    const renderMail = (key: string, items: Letter[], indent: number) => {
+      if (items.length === 0) return null
+      const open = isOpen(key, false)
+      const sent = items.filter(l => l.direction === 'out').length
+      const received = items.length - sent
+      const troubled = items.filter(l => l.problem !== null).length
+
+      return (
+        <Box key={`mail-${key}`} flexDirection="column" paddingLeft={indent} marginTop={1}>
+          <Box flexDirection="row" gap={1}>
+            <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
+            <Box {...fit(indent + 2)}>
+              {seg(room(indent + 2), [
+                { text: '✉', color: 'suggestion' },
+                { text: ' Messages between agents', bold: true },
+                { text: ` · ${[sent > 0 ? `${sent} sent` : null, received > 0 ? `${received} received` : null].filter(p => p !== null).join(' · ')}`, dim: true },
+                troubled > 0 && { text: ` · ${troubled} not through`, color: 'warning' },
+              ])}
+            </Box>
+          </Box>
+          {open && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(indent + 2)}>
+              <Text dimColor wrap="wrap">
+                Agents and sessions talk through messages: SendMessage from the model, a plugin’s own, a teammate’s, a relay’s. Each one here, with what became of it.
+              </Text>
+              {items.map(l => (
+                <Box key={`letter-${l.id}`} flexDirection="column" marginTop={1}>
+                  {seg(room(indent + 4), [
+                    { text: l.direction === 'out' ? '→' : '←', color: 'suggestion' },
+                    { text: l.direction === 'out' ? ` to ${l.peer}` : ` from ${l.peer}`, bold: true },
+                    {
+                      text: ` · ${l.direction === 'out' ? (l.kind === 'model' ? 'sent by the model' : `sent by ${l.kind}`) : l.kind} · ${formatChars(l.chars)} · ${formatTime(l.at)}`,
+                      dim: true,
+                    },
+                    l.direction === 'out' && l.delivered === true && { text: ' · delivered', dim: true },
+                    l.rewritten && { text: ' · changed by a plugin', color: 'suggestion' },
+                  ])}
+                  {l.problem !== null && (
+                    <Text color="warning" wrap="wrap">
+                      {l.direction === 'out' ? `Not delivered: ${l.problem}` : `Taken by a plugin before it was queued, so the model never read it: ${l.problem}`}
+                    </Text>
+                  )}
+                  <Text wrap="wrap" dimColor>
+                    {tidy(l.text)}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      )
+    }
 
     const renderInjections = (key: string, items: Injection[], indent: number) => {
       if (items.length === 0) return null
@@ -1938,6 +2066,7 @@ export const register: Register = on => {
     const othersOpen = isOpen('o:others', false)
     const shownTurns = new Set(allTurns.map(t => t.id))
     const looseInjections = injectionList.filter(i => i.turnId === null || !shownTurns.has(i.turnId))
+    const looseMail = mailList.filter(l => l.turnId === null || !shownTurns.has(l.turnId))
 
     // --- Stats: the session at a glance, from what Glass Box keeps.
 
@@ -2150,6 +2279,7 @@ export const register: Register = on => {
           {term('g-w6', 'Hook.', 'A script from your settings or from a plugin that runs around a tool call and can allow, deny or change it.')}
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
           {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task, with a conversation of its own. It is drawn under the Agent call that started it: its type, its model, the prompt it was given, and its own turns, steps and tool calls.')}
+          {term('g-w20', 'Messages between agents.', 'Agents and sessions talk by message: the model’s SendMessage tool, a teammate, another Claude session, a relay. Each turn lists the messages its loop sent and received, and what became of them.')}
           {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
           {term('g-w13', 'System prompt.', 'The standing instructions sent before the conversation on every request: how Claude Code works, your environment, your tools. The Prompt tab shows it section by section.')}
           {term('g-w14', 'Instruction files.', 'Your CLAUDE.md files (and the files they import with @). They reach the model in front of the conversation’s first message.')}
@@ -2670,6 +2800,7 @@ export const register: Register = on => {
               await update($, compactions, () => [])
               await update($, agents, () => [])
               await update($, messages, () => [])
+              await update($, mail, () => [])
               await update($, toggled, () => [])
             })
           }
@@ -2725,10 +2856,11 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        {looseInjections.length > 0 && (
+        {(looseInjections.length > 0 || looseMail.length > 0) && (
           <Box key="loose-injections" flexDirection="column" marginTop={1}>
             <Text bold>Outside a recorded turn</Text>
             {renderInjections('i:none', looseInjections, 0)}
+            {renderMail('m:none', looseMail, 0)}
           </Box>
         )}
         </Box>

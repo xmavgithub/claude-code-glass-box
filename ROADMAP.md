@@ -114,7 +114,7 @@ operations on `$`) against what Glass Box records. In order of value:
 - [x] **Plugins in the loop.** Which plugins and mods are loaded, from where,
   and what each one hooks and calls: who can change what happens
   (`plugin.register`).
-- [ ] **Messages between agents.** What an agent sends to another
+- [x] **Messages between agents.** What an agent sends to another
   (SendMessage) and what arrives from outside (`session.send`,
   `session.receive`).
 - [ ] **Agents on offer.** The agent types the model is offered, beside the

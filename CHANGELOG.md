@@ -90,6 +90,11 @@ everything below is on `main`. 1.0 will be released when the criteria in
   the step is over tells which: the model thought with no text sent, its
   thinking came back redacted, or it did not think; text the stream did not
   carry is taken from the transcript (`$.session.messages`).
+- **Messages between agents**: under the turn of the loop that sent or
+  received them, every message an agent sent (SendMessage, a plugin's) and
+  every one that arrived (a teammate's, another session's, a relay's, an
+  external event): the other end, delivered or why not, taken or changed by
+  a plugin, the text (`session.send`, `session.receive`).
 - **Where each message came from**, from the origin Claude Code stamps on
   it (`prompt.submit`): a turn you did not type is titled by its sender
   ("Report from subagent Explore", "Background task ended", "Message from
