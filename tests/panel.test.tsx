@@ -153,6 +153,26 @@ test('only the newest turn is open; an older one opens on a click', async ($, on
   await ui.unmount()
 })
 
+test('a step whose stream is closed early (an interrupted turn) does not stay running', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 100) }))
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'text', index: 0, text: 'Let me' } as const
+    yield { kind: 'text', index: 0, text: ' think' } as const
+    return { turnId: e.turnId, index: e.index, answer: 'Let me think', toolUses: [], stopReason: 'end_turn', usage: null } as const
+  })
+
+  const step = $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  await step.next()
+  await step.return(undefined as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const all = await texts(ui)
+  expect(all.some(t => / · no response$/.test(t))).toBe(true)
+  expect(all.some(t => / · running$/.test(t) && t.startsWith('opus'))).toBe(false)
+  await ui.unmount()
+})
+
 test('a value an earlier version stored is declined', async ($, on) => {
   on('state.get', () => ({ value: { value: [{ tool: 'Bash' }], version: 1 } }))
 

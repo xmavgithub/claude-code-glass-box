@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A step whose response is interrupted (Esc during a turn) no longer stays
+  marked as running: it closes as "no response".
+
 ## [0.2.0] - 2026-11-06
 
 ### Added

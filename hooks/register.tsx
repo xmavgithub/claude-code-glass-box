@@ -251,30 +251,40 @@ export const register: Register = on => {
     )
 
     const stream = next(e)
-    for await (const chunk of stream) {
-      if (chunk.kind === 'tool') {
-        const id = chunk.id
-        await quietly(() =>
-          patchStep($, key, s => (s.toolIds.includes(id) ? s : { ...s, toolIds: [...s.toolIds, id] })),
-        )
+    let result: Awaited<typeof stream.result> | undefined
+    try {
+      for await (const chunk of stream) {
+        if (chunk.kind === 'tool') {
+          const id = chunk.id
+          await quietly(() =>
+            patchStep($, key, s => (s.toolIds.includes(id) ? s : { ...s, toolIds: [...s.toolIds, id] })),
+          )
+        }
+        yield chunk
       }
-      yield chunk
+      result = await stream.result
+
+      return result
+    } finally {
+      // Runs also when the stream is closed early (an interrupted turn), so a
+      // step never stays "running" forever.
+      const endedAt = await now($)
+      const done = result
+      await quietly(() =>
+        patchStep($, key, s => ({
+          ...s,
+          durationMs: Math.round(endedAt - startedAt),
+          ...(done === undefined
+            ? { stopReason: null }
+            : {
+                answer: clip(done.answer, MAX_ANSWER),
+                serverTools: (done.serverToolUses ?? []).map(use => use.name),
+                stopReason: done.stopReason,
+                usage: usageOf(done.usage),
+              }),
+        })),
+      )
     }
-    const result = await stream.result
-
-    const endedAt = await now($)
-    await quietly(() =>
-      patchStep($, key, s => ({
-        ...s,
-        durationMs: Math.round(endedAt - startedAt),
-        answer: clip(result.answer, MAX_ANSWER),
-        serverTools: (result.serverToolUses ?? []).map(use => use.name),
-        stopReason: result.stopReason,
-        usage: usageOf(result.usage),
-      })),
-    )
-
-    return result
   })
 
   // The permission verdict: which rule, hook, setting or plugin decided.
