@@ -669,7 +669,26 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
     await ui.unmount()
   }
 
+  // A subagent with no turn recorded is as done as the call that started it.
+  release()
+  await $.tool.call({ tool: 'Agent', description: 'again', prompt: 'Look again.', tool_use_id: 'toolu_Z' } as never)
+  await $.agent.spawn({
+    tool_use_id: 'toolu_Z',
+    prompt: 'Look again.',
+    description: 'again',
+    subagentType: 'general-purpose',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+  } as never)
+
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(has(await texts(ui), /^✓ Subagent general-purpose · haiku-5-5 · 0 steps · 0 tool calls · 0ms · background$/)).toBe(true)
+  await ui.press({ key: 'a:toolu_Z|A1' })
+  const none = await texts(ui)
+  expect(has(none, /^No turn of it is recorded/)).toBe(true)
+  expect(has(none, /the call named none: the agent type’s own model, else the parent’s, opus-5-5/)).toBe(true)
   await ui.press({ key: 't:S2' })
   expect(has(await texts(ui), /Glass Box did not record the call that started it/)).toBe(true)
   await ui.unmount()

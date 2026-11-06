@@ -535,6 +535,12 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     await quietly(() => fillServerResults($, e.agentId ?? null))
+    // A subagent's row is open by default while it works and closed once done:
+    // forget a flip made while it worked, so a row closed stays closed.
+    const finished = e.agentId
+    if (finished !== undefined) {
+      await quietly(() => update($, toggled, list => list.filter(k => !(k.startsWith('a:') && k.endsWith(`|${finished}`)))))
+    }
     let costUsd: number | null = null
     await quietly(async () => {
       const start = costAtStart.get(e.turnId)
@@ -1230,19 +1236,21 @@ export const register: Register = on => {
         drawing.add(id)
         base += outer + 2
         try {
-          return agentRow(spawn, id)
+          return agentRow(spawn, id, call)
         } finally {
           base -= outer + 2
           drawing.delete(id)
         }
       })
 
-    const agentRow = (spawn: Spawn, id: string) => {
+    const agentRow = (spawn: Spawn, id: string, call: ToolCall) => {
       const key = `a:${id}`
       const agentTurns = (turnsBySpawn.get(id) ?? []).slice().sort((a, b) => a.startedAt - b.startedAt)
       const last = agentTurns[agentTurns.length - 1]
       const refused = spawn.denied !== null
-      const running = !refused && (last === undefined || last.outcome === null)
+      // With no turn recorded (not yet, no longer, or none ran here), the
+      // call that started it tells whether it is still at work.
+      const running = !refused && (last !== undefined ? last.outcome === null : call.status === 'running')
       const outcome = last?.outcome != null ? TURN_OUTCOME[last.outcome] : undefined
       const icon = refused ? '⊘' : running ? '●' : (outcome?.icon ?? '✓')
       const color = refused ? 'error' : running ? 'warning' : (outcome?.color ?? 'success')
@@ -1330,7 +1338,9 @@ export const register: Register = on => {
               <Text wrap="wrap">{tidy(spawn.prompt)}</Text>
               {!refused && agentTurns.length === 0 && (
                 <Text dimColor wrap="wrap">
-                  (no turn recorded yet)
+                  {running
+                    ? '(no turn recorded yet)'
+                    : 'No turn of it is recorded: its turns have left the history, or it ran where Glass Box cannot see (a remote agent).'}
                 </Text>
               )}
             </Box>
