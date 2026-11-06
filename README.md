@@ -90,7 +90,7 @@ In the Timeline:
 
 | Level | What you see | Expanded |
 | --- | --- | --- |
-| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome | Its steps |
+| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by what started it: a background subagent's report, another agent's message, a background task's end | Its steps; for a turn you did not type, how it started and its whole text, frame included, as the model read it |
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
 | **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |

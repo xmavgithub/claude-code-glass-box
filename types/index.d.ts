@@ -178,13 +178,31 @@ export type Usage = {
   cacheWrite: number
 }
 
+/**
+ * Who started a main-loop turn you did not type, told by the frame Claude Code
+ * puts around its text: a subagent's final report, another agent's message,
+ * or the end of a background task.
+ */
+export type TurnFrom = {
+  kind: 'report' | 'message' | 'task'
+  /** The agent (or task) the frame names. */
+  agentId: string | null
+  /** A task notification's one-line summary. */
+  summary: string | null
+}
+
 /** A turn: one prompt (yours, or a subagent's) and everything that follows it. */
 export type Turn = {
   id: string
   /** The subagent running the turn; null on the main loop. */
   agentId: string | null
-  /** The text that started the turn, clipped; "" for a continuation. */
+  /** The text that started the turn, clipped; "" for a continuation. For a
+   * turn you did not type, the text inside its frame. */
   prompt: string
+  /** Set when the turn was started by something other than you. */
+  from: TurnFrom | null
+  /** That turn's whole text, frame included, as the model read it; clipped. */
+  frame: string | null
   startedAt: number
   durationMs: number | null
   /** How it ended: answer, aborted, error, refusal; null while it runs. */

@@ -692,4 +692,29 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
   await ui.press({ key: 't:S2' })
   expect(has(await texts(ui), /Glass Box did not record the call that started it/)).toBe(true)
   await ui.unmount()
+
+  // A background agent's report reaches the main loop as a new message: the
+  // turn it starts is told apart from yours by the frame around the text.
+  await $.turn.start({
+    turnId: 'T2',
+    text: '<agent-message from="A1">\n[Subagent hand-back] The text below is the final report. The report follows:\n  Found it in app.ts\n  line 12\n</agent-message>',
+  })
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const report = await texts(after)
+  expect(has(report, /^● Report from subagent Explore · /)).toBe(true)
+  expect(report).toContain('Found it in app.ts\nline 12')
+  expect(has(report, /^Not typed by you\. The Explore subagent started at .* ran in the background/)).toBe(true)
+  expect(has(report, /^<agent-message from="A1">/)).toBe(true)
+  expect(has(report, /^✓ Subagent .* · reported back \d\d:\d\d$/)).toBe(true)
+  await after.unmount()
+
+  await $.turn.start({
+    turnId: 'T3',
+    text: '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Build finished</summary>\n</task-notification>',
+  })
+  const last = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const task = await texts(last)
+  expect(has(task, /^● Background task ended · /)).toBe(true)
+  expect(has(task, /a background task ended \(Build finished\)/)).toBe(true)
+  await last.unmount()
 })

@@ -18,6 +18,7 @@ import type {
   Step,
   ToolCall,
   Turn,
+  TurnFrom,
   Usage,
   Verdict,
   View,
@@ -47,7 +48,7 @@ const MAX_SPAWN_PROMPT = 3000
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
-const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-2' })
+const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-3' })
 const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-2' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
@@ -252,6 +253,40 @@ const CALL_STATUS: Record<CallStatus, { icon: string; color: string }> = {
   ok: { icon: '✓', color: 'success' },
   error: { icon: '✗', color: 'error' },
   denied: { icon: '⊘', color: 'error' },
+}
+
+/**
+ * Who started a main-loop turn you did not type, read from the frame Claude
+ * Code puts around the text, with the text inside it; null for your own
+ * message. `turn.start` does not say who started a turn: the frame does.
+ */
+function originOf(text: string): { from: TurnFrom; body: string } | null {
+  const agent = /^\s*<agent-message from="([^"]+)">([\s\S]*?)(?:<\/agent-message>|$)/.exec(text)
+  if (agent !== null) {
+    const inner = agent[2] ?? ''
+    const marker = 'The report follows:'
+    const at = inner.indexOf(marker)
+    const isReport = /\[Subagent hand-back\]/.test(inner)
+    const report = at === -1 ? inner : inner.slice(at + marker.length)
+    // The harness indents every line of a report by two spaces.
+    const body = report
+      .split('\n')
+      .map(l => l.replace(/^ {2}/, ''))
+      .join('\n')
+      .trim()
+    return { from: { kind: isReport ? 'report' : 'message', agentId: agent[1] ?? null, summary: null }, body }
+  }
+  const task = /^\s*<task-notification>([\s\S]*?)(?:<\/task-notification>|$)/.exec(text)
+  if (task !== null) {
+    const inner = task[1] ?? ''
+    const pick = (tag: string) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(inner)?.[1]?.trim() ?? null
+    const summary = pick('summary')
+    return {
+      from: { kind: 'task', agentId: pick('task-id'), summary },
+      body: pick('result') ?? summary ?? inner.trim(),
+    }
+  }
+  return null
 }
 
 const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string | null }> = {
@@ -502,10 +537,15 @@ export const register: Register = on => {
     const startedAt = await now($)
     await quietly(async () => {
       const before = await read($, turns)
+      // On the main loop, a turn may start from a subagent's report or a
+      // task's end rather than from you: the frame around the text tells.
+      const origin = e.agentId === undefined ? originOf(e.text) : null
       const turn: Turn = {
         id: e.turnId,
         agentId: e.agentId ?? null,
-        prompt: clip(e.text, MAX_PROMPT),
+        prompt: clip(origin?.body ?? e.text, MAX_PROMPT),
+        from: origin?.from ?? null,
+        frame: origin === null ? null : clip(e.text, MAX_INJECTION_TEXT),
         startedAt,
         durationMs: null,
         outcome: null,
@@ -1054,6 +1094,8 @@ export const register: Register = on => {
         id: turnId,
         agentId: list[0]?.agentId ?? null,
         prompt: '',
+        from: null,
+        frame: null,
         startedAt: Math.min(...list.map(s => s.startedAt)),
         durationMs: null,
         outcome: null,
@@ -1259,6 +1301,8 @@ export const register: Register = on => {
       const agentSteps = agentTurns.flatMap(t => stepsByTurn.get(t.id) ?? [])
       const toolCount = agentSteps.reduce((n, s) => n + s.toolIds.length, 0)
       const costs = agentTurns.flatMap(t => (t.costUsd === null ? [] : [t.costUsd]))
+      // A background agent's report starts a turn of the main loop of its own.
+      const reportedAt = allTurns.find(t => t.from?.kind === 'report' && t.from.agentId === spawn.agentId)?.startedAt
       const meta = refused
         ? ['refused']
         : [
@@ -1276,6 +1320,7 @@ export const register: Register = on => {
         spawn.workflow !== null ? `workflow agent ${spawn.workflow.agentIndex}` : null,
         spawn.resumed ? 'resumed' : null,
         spawn.name !== null ? `“${spawn.name}”` : null,
+        reportedAt !== undefined ? `reported back ${formatTime(reportedAt).slice(0, 5)}` : null,
       ]
       const head = [...meta, ...tags].filter(part => part !== null).join(' · ')
       const how = [
@@ -1446,10 +1491,32 @@ export const register: Register = on => {
       ]
         .filter(part => part !== null)
         .join(' · ')
+      const from = turn.from
       const prompt =
         turn.prompt === ''
           ? '(no prompt: a continuation, or started before Glass Box loaded)'
-          : `“${turn.prompt}”`
+          : from !== null
+            ? turn.prompt
+            : `“${turn.prompt}”`
+      const reporter = from?.agentId != null ? spawnList.find(sp => sp.agentId === from.agentId) : undefined
+      const label =
+        from?.kind === 'report'
+          ? ` Report from ${reporter !== undefined ? `subagent ${reporter.type}` : 'a subagent'}`
+          : from?.kind === 'message'
+            ? ' Message from another agent'
+            : from?.kind === 'task'
+              ? ' Background task ended'
+              : turn.agentId !== null && !nested
+                ? ' Subagent'
+                : ' Turn'
+      const fromText =
+        from?.kind === 'report'
+          ? `Not typed by you. ${reporter !== undefined ? `The ${reporter.type} subagent started at ${formatTime(reporter.at)}` : 'A subagent'} ran in the background; when it finished, Claude Code handed its final report to the main loop as a new message, and that started this turn.`
+          : from?.kind === 'message'
+            ? 'Not typed by you: another agent’s message, handed to the main loop as a new message, started this turn.'
+            : from?.kind === 'task'
+              ? `Not typed by you: Claude Code told the main loop that a background task ended${from.summary !== null ? ` (${from.summary})` : ''}, and that started this turn.`
+              : null
 
       return (
         <Box key={`turn-${turn.id}`} flexDirection="column" marginTop={1}>
@@ -1458,16 +1525,26 @@ export const register: Register = on => {
             <Box {...fit(2)}>
               {seg(room(2), [
                 { text: icon, color },
-                { text: turn.agentId !== null && !nested ? ' Subagent' : ' Turn', bold: true },
+                { text: label, bold: true },
                 { text: ` · ${meta}`, dim: true },
               ])}
             </Box>
           </Box>
           <Box paddingLeft={2} {...fit(2)}>
-            <Text color="claude" wrap={open ? 'wrap' : 'truncate-end'}>
+            <Text color={from === null ? 'claude' : undefined} wrap={open ? 'wrap' : 'truncate-end'}>
               {open ? prompt : cut(prompt, room(2))}
             </Text>
           </Box>
+          {open && fromText !== null && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(2)}>
+              <Text dimColor wrap="wrap">
+                {`${fromText} Glass Box tells this from the frame around the text; below, the text as the model read it.`}
+              </Text>
+              <Text dimColor wrap="wrap">
+                {turn.frame ?? ''}
+              </Text>
+            </Box>
+          )}
           {open && turn.agentId !== null && !nested && (
             <Box paddingLeft={2} {...fit(2)}>
               <Text dimColor wrap="wrap">
@@ -2134,6 +2211,7 @@ export const register: Register = on => {
           ) : (
             <Button
               key={`v:${tab.id}`}
+              plain
               hotkey={tab.hotkey}
               label={tab.label}
               onPress={() => void quietly(() => update($, view, () => tab.id))}
@@ -2157,14 +2235,25 @@ export const register: Register = on => {
             ].join(' · ')}
           </Text>
         </Box>
-        <Button
-          key="v:guide"
-          plain
-          dimColor={current !== 'guide'}
-          hotkey="g"
-          label="Guide"
-          onPress={() => void quietly(() => update($, view, () => (current === 'guide' ? 'timeline' : 'guide')))}
-        />
+        {current === 'guide' ? (
+          // Shown as the selected tab while the Guide is open; a press goes back.
+          <Button
+            key="v:guide"
+            variant="primary"
+            hotkey="g"
+            label="Guide"
+            onPress={() => void quietly(() => update($, view, () => 'timeline'))}
+          />
+        ) : (
+          <Button
+            key="v:guide"
+            plain
+            dimColor
+            hotkey="g"
+            label="Guide"
+            onPress={() => void quietly(() => update($, view, () => 'guide'))}
+          />
+        )}
         <Button
           key="clear"
           plain

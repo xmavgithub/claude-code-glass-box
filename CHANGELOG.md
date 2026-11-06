@@ -16,8 +16,9 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 - A live pane beside the chat, opened at session start on a wide terminal and
   with `/glass-box` anywhere. Four tabs (hotkeys `1` to `4` while the pane has
-  the keyboard); **Guide** (`g`) and **Clear** (`c`) are small buttons beside
-  the session's counts, so the tab bar stays short.
+  the keyboard), the selected one drawn as the main button and the others
+  plain; **Guide** (`g`) and **Clear** (`c`) are small buttons beside the
+  session's counts, so the tab bar stays short.
 - **Timeline**: every turn (your message, or a subagent's prompt), every step
   (one request to the model), every server tool and every tool call, as they
   happen. The newest turn is open; turns and steps open and close on a click.
@@ -78,6 +79,12 @@ everything below is on `main`. 1.0 will be released when the criteria in
   turns, steps and tool calls, nested again for agents it starts. It stays
   open while it works (`agent.spawn`). A subagent's turn whose call Glass Box
   did not record stays at the top level and says why.
+- **Turns you did not type** are named by what started them: "Report from
+  subagent Explore" when a background agent hands its final report to the
+  main loop, "Message from another agent", "Background task ended". The
+  prompt line shows the text inside the frame; open, the turn says how it
+  started and shows the whole text as the model read it. The subagent's row
+  says when it reported back.
 
 #### Clarity
 
