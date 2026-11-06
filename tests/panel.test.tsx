@@ -336,6 +336,67 @@ test('the advisor shows as its own row: time, model, and its advice read from th
   await ui.unmount()
 })
 
+test('a call a PreToolUse hook rewrote shows what the model asked for and what ran', async ($, on) => {
+  // Stands for a settings hook such as one that prefixes commands.
+  on('classic.PreToolUse', (_, e) =>
+    e.tool === 'Bash' ? { updatedInput: { command: `rtk ${e.command}` } } : {},
+  )
+  on('tool.call', () => ({ result: {}, text: 'clean' }))
+  await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'toolu_r' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(has(await texts(ui), /^✓ Bash .* {2}rewritten {2}git status → rtk git status$/)).toBe(true)
+
+  await ui.press({ key: 'o:others' })
+  const open = await texts(ui)
+  expect(open).toContain('rewritten before running')
+  expect(open).toContain('command: git status → rtk git status')
+  await ui.unmount()
+})
+
+test('text added to the context is listed under its turn, by who wrote it', async ($, on) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('prompt.attachment', (_, e) => ({ text: e.text }))
+  await $.turn.start({ turnId: 'T1', text: 'hello' })
+  await $.prompt.attachment({
+    type: 'hook_additional_context',
+    text: 'Use the sandbox tools.',
+    origin: { kind: 'hook', event: 'SessionStart' },
+  })
+  await $.prompt.attachment({ type: 'todo_reminder', text: 'Your to-do list is empty.', origin: { kind: 'engine' } })
+  // Carried again with the next request: listed once.
+  await $.prompt.attachment({ type: 'todo_reminder', text: 'Your to-do list is empty.', origin: { kind: 'engine' } })
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(has(await texts(ui), /^\+ Added to the context · 2 items · 47 chars \(~12 tokens\) · hooks 22, Claude Code 25$/)).toBe(true)
+
+    await ui.press({ key: 'i:T1' })
+    const open = await texts(ui)
+    expect(has(open, /^SessionStart hook · hook_additional_context · 22 chars/)).toBe(true)
+    expect(open).toContain('Use the sandbox tools.')
+    expect(has(open, /^Claude Code · todo_reminder · 25 chars/)).toBe(true)
+    await ui.press({ key: 'i:T1' })
+
+    await ui.press({ key: 'v:stats' })
+    expect(has(await texts(ui), /^25 *  Claude Code · todo_reminder \(1×\)$/)).toBe(true)
+    await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})
+
+test('Clear empties the timeline', async ($, on) => {
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  await $.tool.call({ tool: 'Read', file_path: '/a', tool_use_id: 'toolu_x' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(has(await texts(ui), /^✓ Read/)).toBe(true)
+  await ui.press({ key: 'clear' })
+  expect(has(await texts(ui), /^✓ Read/)).toBe(false)
+  expect(has(await texts(ui), /^Nothing yet\./)).toBe(true)
+  await ui.unmount()
+})
+
 test('a value an earlier version stored is declined', async ($, on) => {
   on('state.get', () => ({ value: { value: [{ tool: 'Bash' }], version: 1 } }))
 

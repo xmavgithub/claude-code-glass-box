@@ -1,7 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
-import type { CallStatus, ServerTool, Step, ToolCall, Turn, Usage, Verdict, View } from '../types'
+import type {
+  CallStatus,
+  Change,
+  Injection,
+  Rewrite,
+  ServerTool,
+  Step,
+  ToolCall,
+  Turn,
+  Usage,
+  Verdict,
+  View,
+} from '../types'
 
 const PANE = 'glass-box'
 const TITLE = 'Glass Box'
@@ -15,6 +27,9 @@ const MAX_PROMPT = 600
 const MAX_ANSWER = 1200
 const MAX_INPUT = 2000
 const MAX_OUTPUT = 1500
+const MAX_INJECTIONS = 200
+const MAX_INJECTION_TEXT = 4000
+const MAX_CHANGE = 400
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
@@ -28,6 +43,15 @@ const toggled = atom({ plugin: 'glass-box', key: 'toggled' } as const, [], {
   shape: 'toggled-1',
 })
 const view = atom({ plugin: 'glass-box', key: 'view' } as const, 'timeline', { shape: 'view-1' })
+const rewrites = atom({ plugin: 'glass-box', key: 'rewrites' } as const, [], {
+  shape: 'rewrites-1',
+})
+const injections = atom({ plugin: 'glass-box', key: 'injections' } as const, [], {
+  shape: 'injections-1',
+})
+
+// Gives each injection an id of its own, with the time it was recorded.
+let injectionSeq = 0
 
 const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
@@ -139,6 +163,31 @@ function summarize(args: Record<string, unknown>): string {
   }
   const json = JSON.stringify(args)
   return json === '{}' ? '' : json
+}
+
+/** The arguments a hook changed: compared key by key, as JSON. */
+function diffArgs(before: Record<string, unknown>, after: Record<string, unknown>): Change[] {
+  const json = (value: unknown) => clip(JSON.stringify(value) ?? 'undefined', MAX_CHANGE)
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)].filter(key => !RESERVED.has(key)))
+  const changes: Change[] = []
+  for (const key of keys) {
+    const had = key in before
+    const has = key in after
+    if (had && has && JSON.stringify(before[key]) === JSON.stringify(after[key])) continue
+    changes.push({ key, before: had ? json(before[key]) : null, after: has ? json(after[key]) : null })
+  }
+  return changes
+}
+
+/** A JSON value as it reads: a string without its quotes. */
+function unquote(json: string | null): string {
+  if (json === null) return '(none)'
+  try {
+    const value: unknown = JSON.parse(json)
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : json
+  } catch {
+    return json
+  }
 }
 
 function stringify(args: Record<string, unknown>): string {
@@ -364,6 +413,9 @@ export const register: Register = on => {
       await update($, turns, () => kept)
       if (dropped.size > 0) {
         await update($, steps, list => list.filter(step => !dropped.has(step.turnId)))
+        await update($, injections, list =>
+          list.filter(item => item.turnId === null || !dropped.has(item.turnId)),
+        )
       }
     })
 
@@ -462,6 +514,58 @@ export const register: Register = on => {
     }
   })
 
+  // What the settings hooks answered before a tool ran. Hooks modules sit above
+  // the settings hooks in this chain, so `next(e)` is their answer: a rewrite
+  // of the arguments (`updatedInput`) is recorded against the model's own.
+  on('classic.PreToolUse', async ($, e, next) => {
+    const answer = await next(e)
+    const updated = answer.updatedInput
+    if (updated !== undefined) {
+      const changes = diffArgs(argsOf(e), updated)
+      if (changes.length > 0) {
+        const record: Rewrite = { id: e.tool_use_id, changes }
+        await quietly(() =>
+          update($, rewrites, list => [...list.filter(r => r.id !== record.id), record].slice(-MAX_CALLS)),
+        )
+      }
+    }
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // Everything Claude Code adds to what the model reads besides your message:
+  // reminders, listings, mentioned files, settings hooks' output, plugins'
+  // context. `next(e)` is the text as it goes out (null: left out).
+  on('prompt.attachment', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const agentId = e.agentId ?? null
+      const turn = [...(await read($, turns))].reverse().find(t => t.agentId === agentId)
+      const text = answer.text ?? e.text
+      const at = await now($)
+      const record: Injection = {
+        id: `${at}-${injectionSeq++}`,
+        turnId: turn?.id ?? null,
+        agentId,
+        at,
+        type: e.type,
+        origin: e.origin.kind,
+        event: e.origin.kind === 'engine' ? null : e.origin.event,
+        text: clip(text, MAX_INJECTION_TEXT),
+        chars: text.length,
+        dropped: answer.text === null,
+      }
+      await update($, injections, list =>
+        // The same text carried again for the same turn is listed once.
+        list.some(i => i.turnId === record.turnId && i.type === record.type && i.chars === record.chars && i.text === record.text)
+          ? list
+          : [...list, record].slice(-MAX_INJECTIONS),
+      )
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // The permission verdict: which rule, hook, setting or plugin decided.
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
@@ -537,14 +641,17 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [turnList, stepList, callList, verdictList, toggledList, current] = await Promise.all([
-      read($, turns),
-      read($, steps),
-      read($, calls),
-      read($, verdicts),
-      read($, toggled),
-      read($, view),
-    ])
+    const [turnList, stepList, callList, verdictList, toggledList, current, rewriteList, injectionList] =
+      await Promise.all([
+        read($, turns),
+        read($, steps),
+        read($, calls),
+        read($, verdicts),
+        read($, toggled),
+        read($, view),
+        read($, rewrites),
+        read($, injections),
+      ])
 
     const columns = e.props.bodyColumns
     /** The width a line indented by `indent` cells may take, on the terminal. */
@@ -560,6 +667,13 @@ export const register: Register = on => {
       stepsByTurn.set(step.turnId, list)
     }
     const linked = new Set(stepList.flatMap(s => s.toolIds))
+    const rewriteById = new Map(rewriteList.map(r => [r.id, r]))
+    const injectionsByTurn = new Map<string | null, Injection[]>()
+    for (const item of injectionList) {
+      const list = injectionsByTurn.get(item.turnId) ?? []
+      list.push(item)
+      injectionsByTurn.set(item.turnId, list)
+    }
 
     // Steps whose turn started before Glass Box loaded still get a header.
     const knownTurns = new Set(turnList.map(t => t.id))
@@ -595,6 +709,14 @@ export const register: Register = on => {
       const status = CALL_STATUS[call.status]
       const { name, server } = toolName(call.tool)
       const outcome = verdictOutcome(verdictById.get(call.id), call)
+      const rewrite = rewriteById.get(call.id)
+      // When the hook changed the main argument, the line shows both.
+      const summaryKey = SUMMARY_KEYS.find(key => rewrite?.changes.some(c => c.key === key))
+      const summaryChange = rewrite?.changes.find(c => c.key === summaryKey)
+      const summary =
+        summaryChange !== undefined
+          ? `${tidy(unquote(summaryChange.before))} → ${tidy(unquote(summaryChange.after))}`
+          : tidy(call.summary)
 
       return (
         <Box key={`call-${call.id}`} paddingLeft={indent} {...fit(indent)}>
@@ -610,7 +732,8 @@ export const register: Register = on => {
               ) : (
                 <Text color={outcome.color}>{`  ${outcome.label}`}</Text>
               ))}
-            {call.summary !== '' && <Text>{`  ${tidy(call.summary)}`}</Text>}
+            {rewrite !== undefined && <Text color="suggestion">{'  rewritten'}</Text>}
+            {summary !== '' && <Text>{`  ${summary}`}</Text>}
           </Text>
         </Box>
       )
@@ -635,10 +758,25 @@ export const register: Register = on => {
               .filter(line => line !== null)
               .join('\n')
 
+      const rewrite = rewriteById.get(call.id)
+
       return (
         <Box key={`detail-${call.id}`} flexDirection="column" paddingLeft={indent + 2} marginBottom={1} {...fit(indent + 2)}>
-          <Text color="suggestion">{`input · ${formatTime(call.startedAt)}`}</Text>
+          <Text color="suggestion">{`input, as the model asked · ${formatTime(call.startedAt)}`}</Text>
           <Text wrap="wrap">{tidy(call.input)}</Text>
+          {rewrite !== undefined && (
+            <Box flexDirection="column">
+              <Text color="suggestion">rewritten before running</Text>
+              <Text wrap="wrap">
+                A PreToolUse hook (from your settings or from a plugin) changed the arguments. The model asked for the first value; the tool ran with the second.
+              </Text>
+              <Text wrap="wrap" dimColor>
+                {rewrite.changes
+                  .map(c => `${c.key}: ${tidy(unquote(c.before))} → ${tidy(unquote(c.after))}`)
+                  .join('\n')}
+              </Text>
+            </Box>
+          )}
           <Text color="suggestion">output</Text>
           <Text wrap="wrap" color={call.status === 'ok' ? undefined : status.color}>
             {call.output === '' ? (call.status === 'running' ? '(running)' : '(empty)') : tidy(call.output)}
@@ -801,12 +939,71 @@ export const register: Register = on => {
               {prompt}
             </Text>
           </Box>
+          {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
           {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
         </Box>
       )
     }
 
+    // What Claude Code added to the model's reading for a turn: one line that
+    // opens on each item, with who wrote it and its text.
+    const originLabel = (item: Injection) =>
+      item.origin === 'engine'
+        ? 'Claude Code'
+        : item.origin === 'hook'
+          ? `${item.event ?? 'settings'} hook`
+          : `plugin (${item.event ?? 'context'})`
+
+    const formatChars = (n: number) => `${formatTokens(n)} chars (~${formatTokens(Math.round(n / 4))} tokens)`
+
+    const renderInjections = (key: string, items: Injection[], indent: number) => {
+      if (items.length === 0) return null
+      const open = isOpen(key, false)
+      const total = items.reduce((n, i) => n + i.chars, 0)
+      const byOrigin = new Map<string, number>()
+      for (const item of items) {
+        const label = item.origin === 'engine' ? 'Claude Code' : item.origin === 'hook' ? 'hooks' : 'plugins'
+        byOrigin.set(label, (byOrigin.get(label) ?? 0) + item.chars)
+      }
+      const split = [...byOrigin.entries()].map(([label, n]) => `${label} ${formatTokens(n)}`).join(', ')
+
+      return (
+        <Box key={`inj-${key}`} flexDirection="column" paddingLeft={indent} marginTop={1}>
+          <Box flexDirection="row" gap={1}>
+            <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
+            <Box {...fit(indent + 2)}>
+              <Text wrap="truncate-end">
+                <Text color="suggestion">+</Text>
+                <Text bold>{' Added to the context'}</Text>
+                <Text dimColor>{` · ${plural(items.length, 'item', 'items')} · ${formatChars(total)} · ${split}`}</Text>
+              </Text>
+            </Box>
+          </Box>
+          {open && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(indent + 2)}>
+              <Text dimColor wrap="wrap">
+                Besides your message, Claude Code put this text in front of the model: its own reminders and listings, and the output of hooks and plugins.
+              </Text>
+              {items.map(item => (
+                <Box key={`item-${item.id}`} flexDirection="column" marginTop={1}>
+                  <Text wrap="truncate-end">
+                    <Text bold>{originLabel(item)}</Text>
+                    <Text dimColor>{` · ${item.type} · ${formatChars(item.chars)} · ${formatTime(item.at)}${item.dropped ? ' · left out by a plugin' : ''}`}</Text>
+                  </Text>
+                  <Text wrap="wrap" dimColor>
+                    {tidy(item.text)}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      )
+    }
+
     const othersOpen = isOpen('o:others', false)
+    const shownTurns = new Set(allTurns.map(t => t.id))
+    const looseInjections = injectionList.filter(i => i.turnId === null || !shownTurns.has(i.turnId))
 
     // --- Stats: the session at a glance, from what Glass Box keeps.
 
@@ -902,7 +1099,7 @@ export const register: Register = on => {
       const models = new Map<string, number>()
       for (const s of stepList) models.set(shortModel(s.model), (models.get(shortModel(s.model)) ?? 0) + 1)
 
-      if (callList.length === 0 && stepList.length === 0) {
+      if (callList.length === 0 && stepList.length === 0 && injectionList.length === 0) {
         return <Text dimColor>No activity recorded yet.</Text>
       }
 
@@ -920,6 +1117,32 @@ export const register: Register = on => {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 8)
             .map(([rule, n]) => line(`rule-${rule}`, `${n}`, `rule ${rule}`, 4))}
+
+          {rewriteList.length > 0 &&
+            line('rewrites', `${rewriteList.length}`, 'rewritten by a PreToolUse hook before running', 4)}
+
+          {section('Added to the context')}
+          {injectionList.length === 0 && line('inj-none', 'nothing', 'recorded yet', 8)}
+          {(() => {
+            const groups = new Map<string, { count: number; chars: number }>()
+            for (const item of injectionList) {
+              const label = `${originLabel(item)} · ${item.type}`
+              const group = groups.get(label) ?? { count: 0, chars: 0 }
+              group.count += 1
+              group.chars += item.chars
+              groups.set(label, group)
+            }
+            return [...groups.entries()]
+              .sort((a, b) => b[1].chars - a[1].chars)
+              .map(([label, g]) => line(`inj-${label}`, formatTokens(g.chars), `${label} (${g.count}×)`, 6))
+          })()}
+          {injectionList.length > 0 &&
+            line(
+              'inj-total',
+              formatTokens(injectionList.reduce((n, i) => n + i.chars, 0)),
+              'characters in all, about a quarter as many tokens',
+              6,
+            )}
 
           {section('Model')}
           {line('m-steps', 'steps', `${stepList.length}${finished.length > 0 ? ` · avg ${formatDuration(Math.round(modelMs / finished.length))}` : ''}`, 13)}
@@ -971,8 +1194,8 @@ export const register: Register = on => {
           {section('The loop')}
           {para('g-intro', 'Claude Code is a loop around a model. The model only reads and writes text; Claude Code runs everything else.')}
           {term('g-1', '1. Turn.', 'You send a message. Everything Claude Code does until it answers you is one turn.')}
-          {term('g-2', '2. Step.', 'Claude Code sends the whole conversation to the model. The model writes text and may ask for tools. One request and its answer is one step.')}
-          {term('g-3', '3. Permission check.', 'Before each tool runs, Claude Code checks your settings, hooks and permission mode: allowed, asked, or denied.')}
+          {term('g-2', '2. Step.', 'Claude Code sends the whole conversation to the model. The model writes text and may ask for tools. One request and its answer is one step. Along with your message, Claude Code adds text of its own and of your hooks: reminders, listings, hook output. Glass Box lists it under each turn as Added to the context.')}
+          {term('g-3', '3. Permission check.', 'Before each tool runs, Claude Code checks your settings, hooks and permission mode: allowed, asked, or denied. A hook may also rewrite the call’s arguments; Glass Box marks such calls rewritten and shows what changed.')}
           {term('g-4', '4. Tool call.', 'Claude Code runs the tool (read a file, run a command, search the web…) and adds its result to the conversation.')}
           {term('g-5', '5. Again.', 'With the results, Claude Code starts a new step. The turn ends when a step answers without asking for tools.')}
           {para('g-example', example, true)}
@@ -993,6 +1216,8 @@ export const register: Register = on => {
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
           {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task. It has its own turns, steps and tool calls, shown as Subagent turns.')}
           {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
+          {term('g-w11', 'Added context.', 'Text the model reads besides your message: Claude Code’s reminders (a to-do list, a mode change), listings (skills, tools), files you mentioned, and what hooks and plugins add. It counts against the context like anything else.')}
+          {term('g-w12', 'Rewritten call.', 'A call whose arguments a PreToolUse hook changed after the model asked for it: the tool ran with the hook’s version, not the model’s.')}
           {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
 
           {section('What Glass Box cannot see')}
@@ -1015,6 +1240,23 @@ export const register: Register = on => {
             />
           ),
         )}
+        <Button
+          key="clear"
+          dimColor
+          hotkey="c"
+          label="Clear"
+          onPress={() =>
+            void quietly(async () => {
+              await update($, turns, () => [])
+              await update($, steps, () => [])
+              await update($, calls, () => [])
+              await update($, verdicts, () => [])
+              await update($, rewrites, () => [])
+              await update($, injections, () => [])
+              await update($, toggled, () => [])
+            })
+          }
+        />
       </Box>
     )
 
@@ -1064,6 +1306,12 @@ export const register: Register = on => {
                 {othersOpen && callDetail(call, 2)}
               </Box>
             ))}
+          </Box>
+        )}
+        {looseInjections.length > 0 && (
+          <Box key="loose-injections" flexDirection="column" marginTop={1}>
+            <Text bold>Outside a recorded turn</Text>
+            {renderInjections('i:none', looseInjections, 0)}
           </Box>
         )}
         </Box>

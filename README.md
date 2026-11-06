@@ -82,8 +82,9 @@ In the Timeline:
 | --- | --- | --- |
 | **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome | Its steps |
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
+| **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
-| **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), main argument | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
+| **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
 steps, tool calls and failures for the session. Tool calls that no recorded
@@ -144,9 +145,10 @@ not installed.
   nothing anywhere and keeps nothing across sessions.
 - The pane shows tool inputs and outputs as they are, which can include file
   contents or command output you would not want on a shared screen.
-- To stay light it keeps the last 30 turns and 300 tool calls, and clips long
-  texts (prompts at 600 characters, step text at 1,200, inputs at 2,000,
-  outputs at 1,500).
+- To stay light it keeps the last 30 turns, 300 tool calls and 200 items of
+  added context, and clips long texts (prompts at 600 characters, step text at
+  1,200, inputs at 2,000, outputs at 1,500, added context at 4,000). **Clear**
+  empties it at any time.
 
 ## Limitations
 
@@ -161,15 +163,10 @@ not installed.
 
 ## Roadmap
 
-Ideas, not promises. Discussion and pull requests are welcome.
-
-- A fixed header with context window usage, session cost and rate limits.
-- Filters: errors only, current turn, by tool.
-- A statistics view: calls, total time and failures per tool.
-- An excerpt of the model's thinking for each step, where the model streams it.
-- The active instructions: which system prompt sections (CLAUDE.md, memory,
-  skills) were in play, with their size.
-- Skills loaded and compactions as their own timeline rows.
+See [ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held
+to, and the milestones ahead, from showing rewritten tool calls and injected
+context (0.4) to the active instructions, the context window and cost,
+subagents and the model's reasoning. Discussion and pull requests are welcome.
 
 ## Development
 

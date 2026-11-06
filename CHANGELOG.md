@@ -6,6 +6,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Rewritten calls.** When a PreToolUse hook (from your settings or a plugin)
+  changes a tool call's arguments, the call is marked `rewritten` and its line
+  shows both versions (`git status → rtk git status`); its details list every
+  changed argument. Read from the hooks' own answer (`classic.PreToolUse`).
+- **Added to the context.** Under each turn, everything Claude Code put in
+  front of the model besides your message: its own reminders and listings,
+  files you mentioned, settings hooks' output (by event, such as
+  SessionStart) and plugins' context, with size and full text
+  (`prompt.attachment`). Stats sums it up by source.
+- **Clear** button (hotkey `c`) to empty the timeline.
+- [ROADMAP.md](ROADMAP.md): vision, principles and milestones.
+
 ## [0.3.0] - 2026-11-06
 
 ### Added

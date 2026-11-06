@@ -83,6 +83,44 @@ export type ToolCall = {
   durationMs: number | null
 }
 
+/** One argument a hook changed before the tool ran. */
+export type Change = {
+  key: string
+  /** As the model asked for it, as JSON, clipped; null when the hook added the key. */
+  before: string | null
+  /** As the tool ran with it, as JSON, clipped; null when the hook removed the key. */
+  after: string | null
+}
+
+/** A tool call whose arguments a PreToolUse hook rewrote before it ran. */
+export type Rewrite = {
+  /** The call's tool_use_id. */
+  id: string
+  changes: Change[]
+}
+
+/** Text Claude Code added to what the model reads, besides your message. */
+export type Injection = {
+  /** Unique within the session. */
+  id: string
+  /** The turn whose request carried it; null when no turn was recorded yet. */
+  turnId: string | null
+  agentId: string | null
+  at: number
+  /** The engine's name for it: todo_reminder, skill_listing, hook_additional_context… */
+  type: string
+  /** Who wrote it: Claude Code itself, a settings hook, or a plugin. */
+  origin: 'engine' | 'hook' | 'plugin'
+  /** For a hook or a plugin: the event that produced it (SessionStart…). */
+  event: string | null
+  /** What the model reads, clipped. */
+  text: string
+  /** Its full length in characters, before clipping. */
+  chars: number
+  /** True when a plugin's hook left it out of the request. */
+  dropped: boolean
+}
+
 /** The permission verdict on a tool call: who allowed or denied it, and why. */
 export type Verdict = {
   /** The call's tool_use_id. */
@@ -108,6 +146,8 @@ declare module 'claude-code' {
       steps: Shaped<Step[]>
       calls: Shaped<ToolCall[]>
       verdicts: Shaped<Verdict[]>
+      rewrites: Shaped<Rewrite[]>
+      injections: Shaped<Injection[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */
