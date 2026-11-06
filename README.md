@@ -61,7 +61,7 @@ Claude Code does everything else.
 5. **Again.** With the results, Claude Code starts a new step. The turn ends
    when a step answers without asking for tools.
 
-Glass Box draws exactly this loop, live, and its **How it works** tab tells it
+Glass Box draws exactly this loop, live, and its **Guide** tab tells it
 with your own numbers, plus a legend and a short glossary.
 
 ## What it shows
@@ -73,7 +73,7 @@ The pane has five tabs (hotkeys `1` to `5` while it has the keyboard):
   the permission checks came to and which rules allowed the most; what was
   added to the context, by source; time in the model against time in tools,
   tokens, context and cache, stop reasons.
-- **Instructions**: what the model is told before it reads the conversation.
+- **Prompt**: what the model is told before it reads the conversation.
   The system prompt section by section (shared or yours, size, text); the
   blocks in front of the first message and the CLAUDE.md files behind them;
   the tools offered, loaded in full or behind ToolSearch; the skills loaded.
@@ -81,7 +81,7 @@ The pane has five tabs (hotkeys `1` to `5` while it has the keyboard):
   prompt, tools, memory files, MCP servers, messages, free space), as
   /context counts it; the session's cost and each recent turn's; the
   rate-limit windows and when they reset; the compactions.
-- **How it works**: the loop above, a legend of the marks and colors, and a
+- **Guide**: the loop above, a legend of the marks and colors, and a
   glossary (token, context, cache, effort, permission rule, hook, auto mode,
   subagent, MCP tool, server tool).
 
@@ -96,7 +96,7 @@ In the Timeline:
 | **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
-steps, tool calls and failures for the session. Tool calls that no recorded
+steps, tool calls and failures for the session, with **Clear** (`c`) beside it. Tool calls that no recorded
 step asked for (raised by another plugin, or made before Glass Box loaded) are
 listed at the bottom under **Other tool calls**.
 

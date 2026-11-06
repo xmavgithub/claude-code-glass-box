@@ -97,9 +97,9 @@ const toolSeen = new Map<string, string>()
 const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
   { id: 'stats', label: 'Stats', hotkey: '2' },
-  { id: 'instructions', label: 'Instructions', hotkey: '3' },
+  { id: 'instructions', label: 'Prompt', hotkey: '3' },
   { id: 'context', label: 'Context', hotkey: '4' },
-  { id: 'guide', label: 'How it works', hotkey: '5' },
+  { id: 'guide', label: 'Guide', hotkey: '5' },
 ]
 
 // The session's working directory, to show paths relative to it, and the
@@ -1923,8 +1923,25 @@ export const register: Register = on => {
             />
           ),
         )}
+      </Box>
+    )
+
+    // The session's counts, with Clear beside them rather than among the tabs.
+    const counters = (
+      <Box flexDirection="row" gap={2}>
+        <Box {...fit(10)}>
+          <Text dimColor wrap="truncate-end">
+            {[
+              plural(allTurns.length, 'turn', 'turns'),
+              plural(stepList.length, 'step', 'steps'),
+              plural(callList.length, 'tool call', 'tool calls'),
+              `${failed} failed`,
+            ].join(' · ')}
+          </Text>
+        </Box>
         <Button
           key="clear"
+          plain
           dimColor
           hotkey="c"
           label="Clear"
@@ -1948,16 +1965,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {tabBar}
-        <Box {...fit(0)}>
-          <Text dimColor wrap="truncate-end">
-            {[
-              plural(allTurns.length, 'turn', 'turns'),
-              plural(stepList.length, 'step', 'steps'),
-              plural(callList.length, 'tool call', 'tool calls'),
-              `${failed} failed`,
-            ].join(' · ')}
-          </Text>
-        </Box>
+        {counters}
         {current === 'stats'
           ? renderStats()
           : current === 'instructions'
@@ -1978,7 +1986,7 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">
               Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
             </Text>
-            <Text dimColor wrap="wrap">New to this? Open How it works (press 5 while the pane has the keyboard).</Text>
+            <Text dimColor wrap="wrap">New to this? Open the Guide (press 5 while the pane has the keyboard).</Text>
           </Box>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}

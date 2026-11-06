@@ -37,7 +37,7 @@ everything added to the model's context), and what the model is told (the
 system prompt, the first message's context blocks and CLAUDE.md files, the
 tools offered, the skills loaded), and the resources (the context window and
 what fills it, cost per session and per turn, rate limits, compactions). Five
-tabs: Timeline, Stats, Instructions, Context, How it works.
+tabs: Timeline, Stats, Prompt, Context, Guide.
 
 ## Next
 
@@ -115,7 +115,7 @@ Glass Box reaches 1.0 when:
   explicitly listed as out of reach;
 - it has been used live on the terminal, VS Code and the desktop app, with no
   known layout problem;
-- the How it works tab and the README explain everything the pane shows.
+- the Guide tab and the README explain everything the pane shows.
 
 ## Contributing to the roadmap
 

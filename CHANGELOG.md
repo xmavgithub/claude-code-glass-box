@@ -15,8 +15,9 @@ everything below is on `main`. 1.0 will be released when the criteria in
 #### The pane and its tabs
 
 - A live pane beside the chat, opened at session start on a wide terminal and
-  with `/glass-box` anywhere. Five tabs (hotkeys `1` to `5` while the pane has
-  the keyboard) and a **Clear** button (`c`).
+  with `/glass-box` anywhere. Five tabs with short labels (hotkeys `1` to `5`
+  while the pane has the keyboard), and a **Clear** button (`c`) beside the
+  session's counts rather than among the tabs.
 - **Timeline**: every turn (your message, or a subagent's prompt), every step
   (one request to the model), every server tool and every tool call, as they
   happen. The newest turn is open; turns and steps open and close on a click.
@@ -24,7 +25,7 @@ everything below is on `main`. 1.0 will be released when the criteria in
   came to and which settings rules allowed the most calls; what was added to
   the context, by source; time in the model against time in tools, output
   tokens, peak context and cache share, stop reasons, models.
-- **Instructions**: what the model is told before it reads the conversation.
+- **Prompt**: what the model is told before it reads the conversation.
   The system prompt section by section, shared or yours, with size and text
   (`prompt.compose`); the blocks in front of the first message and the
   CLAUDE.md files behind them, with their kind and imports
@@ -38,7 +39,7 @@ everything below is on `main`. 1.0 will be released when the criteria in
   `$.session.usage`, `session.compact`).
   The meters are two colored boxes, blue, yellow from 70% and red from 90%,
   drawn the same on every surface.
-- **How it works**: the agent loop in five steps with the numbers of your last
+- **Guide**: the agent loop in five steps with the numbers of your last
   turn, a legend of marks and colors, a glossary, and what Glass Box cannot
   see.
 
