@@ -41,7 +41,7 @@ Code events they build on.
 
 ### 0.4: What actually ran, and what was added
 
-*"Is what ran what the model asked for? What else did the model read?"*
+> "Is what ran what the model asked for? What else did the model read?"
 
 - [x] **Rewritten calls.** Show when a PreToolUse hook changed a call's
   arguments, with both versions, from the hooks' own answer
@@ -56,7 +56,7 @@ Code events they build on.
 
 ### 0.5: What the model is told
 
-*"Which instructions and tools did the model have?"*
+> "Which instructions and tools did the model have?"
 
 - [ ] **Active instructions.** The sections of the system prompt (CLAUDE.md
   files, memory, the skills listing, output style…) with their size, from
@@ -68,7 +68,7 @@ Code events they build on.
 
 ### 0.6: Resources
 
-*"How full is the context, and what does the session cost?"*
+> "How full is the context, and what does the session cost?"
 
 - [ ] **Context tab.** Context window usage, session cost and rate-limit
   windows, live, from `session.measure`.
@@ -77,7 +77,7 @@ Code events they build on.
 
 ### 0.7: Agents
 
-*"Who did the work?"*
+> "Who did the work?"
 
 - [ ] **Subagents tied to their call.** Link each `Agent` call to the subagent
   turn it started, with its type, model and prompt (`agent.spawn`).
@@ -86,7 +86,7 @@ Code events they build on.
 
 ### 0.8: Reasoning (experimental)
 
-*"Why did the model do that?"*
+> "Why did the model do that?"
 
 - [ ] **Thinking excerpts.** Where the model streams its thinking, an excerpt
   per step. What arrives depends on the model and may be summarized or empty;
