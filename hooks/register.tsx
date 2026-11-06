@@ -28,6 +28,10 @@ const toggled = atom({ plugin: 'glass-box', key: 'toggled' } as const, [], {
   shape: 'toggled-1',
 })
 
+// The session's working directory, to show paths relative to it. Set at
+// session.start, which runs again on every reload.
+let cwd = ''
+
 // ---------------------------------------------------------------------------
 // Helpers
 
@@ -51,9 +55,23 @@ async function now($: EngineInterface): Promise<number> {
 const clip = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}… (+${text.length - max} chars)` : text
 
-const firstLine = (text: string) => {
-  const line = text.trim().split('\n', 1)[0] ?? ''
-  return line
+const firstLine = (text: string) => text.trim().split('\n', 1)[0] ?? ''
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** Paths relative to the working directory, and the home folder as `~`. */
+function tidy(text: string): string {
+  if (cwd === '') return text
+  let out = text.split(`${cwd}/`).join('')
+  const home = /^(\/Users\/[^/]+|\/home\/[^/]+)/.exec(cwd)?.[1]
+  if (home !== undefined) out = out.split(`${home}/`).join('~/')
+  return out
+}
+
+/** `mcp__server__tool` reads as `tool` from `server`. */
+function toolName(tool: string): { name: string; server: string | null } {
+  const match = /^mcp__(.+?)__(.+)$/.exec(tool)
+  return match === null ? { name: tool, server: null } : { name: match[2] ?? tool, server: match[1] ?? null }
 }
 
 function usageOf(usage: TurnUsage | null | undefined): Usage | null {
@@ -101,11 +119,14 @@ function argsOf(e: object): Record<string, unknown> {
 }
 
 function summarize(args: Record<string, unknown>): string {
+  const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim()
   for (const key of SUMMARY_KEYS) {
     const value = args[key]
-    if (typeof value === 'string' && value.trim() !== '') {
-      return value.replace(/\s+/g, ' ').trim()
-    }
+    if (typeof value === 'string' && value.trim() !== '') return oneLine(value)
+  }
+  // Any other tool (an MCP tool, say): its first string argument.
+  for (const value of Object.values(args)) {
+    if (typeof value === 'string' && value.trim() !== '') return oneLine(value)
   }
   const json = JSON.stringify(args)
   return json === '{}' ? '' : json
@@ -123,11 +144,11 @@ const CALL_STATUS: Record<CallStatus, { icon: string; color: string }> = {
   running: { icon: '●', color: 'warning' },
   ok: { icon: '✓', color: 'success' },
   error: { icon: '✗', color: 'error' },
-  denied: { icon: '⊘', color: 'permission' },
+  denied: { icon: '⊘', color: 'error' },
 }
 
-const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string }> = {
-  answer: { icon: '✓', color: 'success', label: 'answered' },
+const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string | null }> = {
+  answer: { icon: '✓', color: 'success', label: null },
   aborted: { icon: '⊘', color: 'warning', label: 'interrupted' },
   error: { icon: '✗', color: 'error', label: 'failed' },
   refusal: { icon: '✗', color: 'error', label: 'refused' },
@@ -144,21 +165,25 @@ const STOP_REASON: Record<string, string> = {
   model_context_window_exceeded: 'context full',
 }
 
-function verdictLabel(v: Verdict): string {
-  if (v.decision === 'allow') {
-    return v.rule !== null ? `allowed by ${v.rule}` : v.hook !== null ? `allowed by ${v.hook} hook` : 'allowed'
-  }
+/**
+ * What the permission check came to, in a word or two. Routine outcomes have
+ * no color (drawn dim); only what deserves attention is colored.
+ */
+function verdictOutcome(v: Verdict | undefined, call: ToolCall): { label: string; color?: string } | null {
+  if (v === undefined) return null
   if (v.decision === 'deny') {
-    return v.rule !== null ? `denied by ${v.rule}` : v.hook !== null ? `denied by ${v.hook} hook` : 'denied'
+    return { label: v.rule !== null ? `denied · ${v.rule}` : 'denied', color: 'error' }
   }
-  const by = v.plugin ?? v.setting ?? v.hook
-  return by !== null ? `approval asked (${by})` : 'approval asked'
-}
-
-const VERDICT_COLOR: Record<Verdict['decision'], string> = {
-  allow: 'success',
-  ask: 'warning',
-  deny: 'error',
+  if (v.decision === 'ask') {
+    if (call.status === 'running') return { label: 'awaiting approval', color: 'warning' }
+    // A refused ask reaches the model as an error result, not as a deny.
+    const refused = /^Permission to use .+ (has been|was) denied/.test(call.output)
+    if (call.status === 'denied' || refused) return { label: 'rejected', color: 'error' }
+    return { label: 'approved' }
+  }
+  if (v.rule !== null) return { label: v.rule }
+  if (v.hook !== null) return { label: 'hook' }
+  return { label: 'allowed' }
 }
 
 async function patchStep($: EngineInterface, key: string, patch: (step: Step) => Step) {
@@ -170,6 +195,7 @@ async function patchStep($: EngineInterface, key: string, patch: (step: Step) =>
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    cwd = e.cwd
     await $.command.register({
       name: 'glass-box',
       description: 'Open the Glass Box pane: every turn, model step and tool call of this session',
@@ -354,6 +380,11 @@ export const register: Register = on => {
 
   // -------------------------------------------------------------------------
   // The pane
+  //
+  // One line per item, each a single Text the surface truncates with "…". The
+  // terminal gets an explicit width from the pane's body, so a line never runs
+  // past the edge. Only turns and steps have a toggle: a step opens on its
+  // text, its tokens and the details of its tool calls.
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
@@ -364,6 +395,11 @@ export const register: Register = on => {
       read($, verdicts),
       read($, toggled),
     ])
+
+    const columns = e.props.bodyColumns
+    /** The width a line indented by `indent` cells may take, on the terminal. */
+    const fit = (indent: number) =>
+      e.surface === 'terminal' ? { width: Math.max(8, columns - indent) } : {}
 
     const callById = new Map(callList.map(c => [c.id, c]))
     const verdictById = new Map(verdictList.map(v => [v.id, v]))
@@ -380,10 +416,9 @@ export const register: Register = on => {
     const allTurns: Turn[] = [...turnList]
     for (const [turnId, list] of stepsByTurn) {
       if (knownTurns.has(turnId)) continue
-      const first = list[0]
       allTurns.push({
         id: turnId,
-        agentId: first?.agentId ?? null,
+        agentId: list[0]?.agentId ?? null,
         prompt: '',
         startedAt: Math.min(...list.map(s => s.startedAt)),
         durationMs: null,
@@ -405,84 +440,85 @@ export const register: Register = on => {
     const failed = callList.filter(c => c.status === 'error' || c.status === 'denied').length
     const orphans = callList.filter(c => !linked.has(c.id)).reverse()
 
-    const renderCall = (call: ToolCall, showAgent: boolean) => {
+    // One tool call on one line: status, tool, duration, verdict, main argument.
+    const callLine = (call: ToolCall, indent: number, showAgent: boolean) => {
       const status = CALL_STATUS[call.status]
-      const verdict = verdictById.get(call.id)
-      const key = `c:${call.id}`
-      const open = isOpen(key, false)
+      const { name, server } = toolName(call.tool)
+      const outcome = verdictOutcome(verdictById.get(call.id), call)
 
       return (
-        <Box key={`call-${call.id}`} flexDirection="column" paddingLeft={2}>
-          <Box flexDirection="row" gap={1}>
-            <Button key={key} plain label={open ? '▾' : '▸'} onPress={toggle(key)} />
+        <Box key={`call-${call.id}`} paddingLeft={indent} {...fit(indent)}>
+          <Text wrap="truncate-end">
             <Text color={status.color}>{status.icon}</Text>
-            <Text bold>{call.tool}</Text>
-            {showAgent && call.agentId !== null && <Text color="subtle">[subagent]</Text>}
-            <Text dimColor>{formatDuration(call.durationMs)}</Text>
-            {verdict !== undefined && (
-              <Text color={VERDICT_COLOR[verdict.decision]} wrap="truncate-end">
-                {verdictLabel(verdict)}
-              </Text>
-            )}
-          </Box>
-          {call.summary !== '' && (
-            <Box paddingLeft={2}>
-              <Text dimColor wrap={open ? 'wrap' : 'truncate-end'}>
-                {call.summary}
-              </Text>
-            </Box>
-          )}
-          {open && (
-            <Box flexDirection="column" paddingLeft={2} marginTop={1}>
-              <Text color="suggestion">{`input · ${formatTime(call.startedAt)}`}</Text>
-              <Text wrap="wrap">{call.input}</Text>
-              <Text color="suggestion">output</Text>
-              <Text wrap="wrap" color={call.status === 'ok' ? undefined : status.color}>
-                {call.output === ''
-                  ? call.status === 'running'
-                    ? '(running)'
-                    : '(empty)'
-                  : call.output}
-              </Text>
-              <Text color="suggestion">permission</Text>
-              {verdict === undefined ? (
-                <Text dimColor>(no verdict recorded)</Text>
+            <Text bold>{` ${name}`}</Text>
+            {server !== null && <Text dimColor>{` ·${server}`}</Text>}
+            {showAgent && call.agentId !== null && <Text color="subtle">{' [subagent]'}</Text>}
+            <Text dimColor>{`  ${formatDuration(call.durationMs)}`}</Text>
+            {outcome !== null &&
+              (outcome.color === undefined ? (
+                <Text dimColor>{`  ${outcome.label}`}</Text>
               ) : (
-                <Text wrap="wrap">
-                  {[
-                    `decision: ${verdict.decision}`,
-                    verdict.reason !== null ? `reason: ${verdict.reason}` : null,
-                    verdict.rule !== null ? `rule: ${verdict.rule}` : null,
-                    verdict.hook !== null ? `hook: ${verdict.hook}` : null,
-                    verdict.setting !== null ? `setting: ${verdict.setting}` : null,
-                    verdict.plugin !== null ? `plugin: ${verdict.plugin}` : null,
-                    verdict.approver !== null ? `approver: ${verdict.approver}` : null,
-                  ]
-                    .filter(line => line !== null)
-                    .join('\n')}
-                </Text>
-              )}
-            </Box>
-          )}
+                <Text color={outcome.color}>{`  ${outcome.label}`}</Text>
+              ))}
+            {call.summary !== '' && <Text>{`  ${tidy(call.summary)}`}</Text>}
+          </Text>
         </Box>
       )
     }
 
-    const renderStep = (step: Step) => {
+    // A call's full record, shown under its line while its step is open.
+    const callDetail = (call: ToolCall, indent: number) => {
+      const verdict = verdictById.get(call.id)
+      const status = CALL_STATUS[call.status]
+      const permission =
+        verdict === undefined
+          ? '(no verdict recorded)'
+          : [
+              `decision: ${verdict.decision}`,
+              verdict.reason !== null ? `reason: ${verdict.reason}` : null,
+              verdict.rule !== null ? `rule: ${verdict.rule}` : null,
+              verdict.hook !== null ? `hook: ${verdict.hook}` : null,
+              verdict.setting !== null ? `setting: ${verdict.setting}` : null,
+              verdict.plugin !== null ? `plugin: ${verdict.plugin}` : null,
+              verdict.approver !== null ? `approver: ${verdict.approver}` : null,
+            ]
+              .filter(line => line !== null)
+              .join('\n')
+
+      return (
+        <Box key={`detail-${call.id}`} flexDirection="column" paddingLeft={indent + 2} marginBottom={1} {...fit(indent + 2)}>
+          <Text color="suggestion">{`input · ${formatTime(call.startedAt)}`}</Text>
+          <Text wrap="wrap">{tidy(call.input)}</Text>
+          <Text color="suggestion">output</Text>
+          <Text wrap="wrap" color={call.status === 'ok' ? undefined : status.color}>
+            {call.output === '' ? (call.status === 'running' ? '(running)' : '(empty)') : tidy(call.output)}
+          </Text>
+          <Text color="suggestion">permission</Text>
+          <Text wrap="wrap" dimColor={verdict === undefined}>
+            {permission}
+          </Text>
+        </Box>
+      )
+    }
+
+    const renderStep = (step: Step, previous: Step | undefined) => {
       const key = `s:${step.key}`
       const open = isOpen(key, false)
       const isRunning = step.durationMs === null
       const failedStep = !isRunning && (step.stopReason === null || step.stopReason === 'refusal')
       const icon = isRunning ? '●' : failedStep ? '✗' : '✓'
       const color = isRunning ? 'warning' : failedStep ? 'error' : 'success'
-      const effort = step.effort !== null ? ` ${step.effort}` : ''
-      const tokens =
-        step.usage !== null
-          ? ` · ${formatTokens(contextTokens(step.usage))} in · ${formatTokens(step.usage.output)} out`
+      // The model only where it changes: the first step, or a switch.
+      const model =
+        previous === undefined || previous.model !== step.model || previous.effort !== step.effort
+          ? `${shortModel(step.model)}${step.effort !== null ? ` ${step.effort}` : ''} · `
           : ''
-      const stop = isRunning
-        ? ' · running'
-        : ` · ${step.stopReason === null ? 'no response' : STOP_REASON[step.stopReason] ?? step.stopReason}`
+      const out = step.usage !== null ? ` · out ${formatTokens(step.usage.output)}` : ''
+      const state = isRunning
+        ? 'running'
+        : step.stopReason === null
+          ? 'no response'
+          : STOP_REASON[step.stopReason] ?? step.stopReason
       const stepCalls = step.toolIds.flatMap(id => {
         const call = callById.get(id)
         return call === undefined ? [] : [call]
@@ -491,26 +527,32 @@ export const register: Register = on => {
       return (
         <Box key={`step-${step.key}`} flexDirection="column" paddingLeft={2} marginTop={1}>
           <Box flexDirection="row" gap={1}>
-            <Button key={key} plain label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Text color={color}>{icon}</Text>
-            <Text bold>{`Step ${step.index + 1}`}</Text>
-            <Text dimColor wrap="truncate-end">
-              {`${shortModel(step.model)}${effort} · ${formatDuration(step.durationMs)}${tokens}${stop}`}
-            </Text>
+            <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
+            <Box {...fit(4)}>
+              <Text wrap="truncate-end">
+                <Text color={color}>{icon}</Text>
+                <Text bold>{` Step ${step.index + 1}`}</Text>
+                <Text dimColor>
+                  {` · ${model}${isRunning ? '' : `${formatDuration(step.durationMs)}${out} · `}${state}`}
+                </Text>
+              </Text>
+            </Box>
           </Box>
           {step.answer !== '' && (
-            <Box paddingLeft={2}>
-              <Text wrap={open ? 'wrap' : 'truncate-end'}>
-                {open ? step.answer : firstLine(step.answer)}
+            <Box paddingLeft={2} {...fit(4)}>
+              <Text dimColor italic wrap={open ? 'wrap' : 'truncate-end'}>
+                {`› ${open ? step.answer : firstLine(step.answer)}`}
               </Text>
             </Box>
           )}
           {open && (
-            <Box flexDirection="column" paddingLeft={2} marginTop={1}>
-              <Text dimColor>{`started ${formatTime(step.startedAt)} · ${step.messageCount} messages in the request`}</Text>
+            <Box flexDirection="column" paddingLeft={2} marginBottom={1} {...fit(4)}>
+              <Text dimColor wrap="wrap">
+                {`${shortModel(step.model)}${step.effort !== null ? ` · effort ${step.effort}` : ''} · ${step.messageCount} messages · started ${formatTime(step.startedAt)}`}
+              </Text>
               {step.usage !== null && (
                 <Text dimColor wrap="wrap">
-                  {`tokens: ${step.usage.input} input · ${step.usage.cacheRead} cache read · ${step.usage.cacheWrite} cache write · ${step.usage.output} output`}
+                  {`tokens: ${formatTokens(contextTokens(step.usage))} context (${formatTokens(step.usage.cacheRead)} cached, ${formatTokens(step.usage.cacheWrite)} written, ${formatTokens(step.usage.input)} new) · ${formatTokens(step.usage.output)} output`}
                 </Text>
               )}
               {step.serverTools.length > 0 && (
@@ -518,7 +560,12 @@ export const register: Register = on => {
               )}
             </Box>
           )}
-          {stepCalls.map(call => renderCall(call, false))}
+          {stepCalls.map(call => (
+            <Box key={`row-${call.id}`} flexDirection="column">
+              {callLine(call, 2, false)}
+              {open && callDetail(call, 2)}
+            </Box>
+          ))}
         </Box>
       )
     }
@@ -531,43 +578,79 @@ export const register: Register = on => {
       const outcome = turn.outcome === null ? undefined : TURN_OUTCOME[turn.outcome]
       const icon = outcome?.icon ?? '●'
       const color = outcome?.color ?? 'warning'
-      const state = outcome?.label ?? 'running'
-      const prompt = turn.prompt === '' ? '(no prompt: a continuation, or started before Glass Box loaded)' : `“${turn.prompt}”`
+      const lastUsage = [...turnSteps].reverse().find(s => s.usage !== null)?.usage ?? null
+      const meta = [
+        formatTime(turn.startedAt).slice(0, 5),
+        plural(turnSteps.length, 'step', 'steps'),
+        plural(toolCount, 'tool', 'tools'),
+        lastUsage !== null ? `ctx ${formatTokens(contextTokens(lastUsage))}` : null,
+        outcome === undefined ? 'running' : formatDuration(turn.durationMs),
+        outcome?.label ?? null,
+      ]
+        .filter(part => part !== null)
+        .join(' · ')
+      const prompt =
+        turn.prompt === ''
+          ? '(no prompt: a continuation, or started before Glass Box loaded)'
+          : `“${turn.prompt}”`
 
       return (
         <Box key={`turn-${turn.id}`} flexDirection="column" marginTop={1}>
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Text color={color}>{icon}</Text>
-            <Text bold>{turn.agentId !== null ? 'Subagent turn' : 'Turn'}</Text>
-            <Text dimColor wrap="truncate-end">
-              {`${formatTime(turn.startedAt)} · ${turnSteps.length} steps · ${toolCount} tools · ${formatDuration(turn.durationMs)} · ${state}`}
-            </Text>
+            <Box {...fit(2)}>
+              <Text wrap="truncate-end">
+                <Text color={color}>{icon}</Text>
+                <Text bold>{turn.agentId !== null ? ' Subagent' : ' Turn'}</Text>
+                <Text dimColor>{` · ${meta}`}</Text>
+              </Text>
+            </Box>
           </Box>
-          <Box paddingLeft={2}>
+          <Box paddingLeft={2} {...fit(2)}>
             <Text color="claude" wrap={open ? 'wrap' : 'truncate-end'}>
               {prompt}
             </Text>
           </Box>
-          {open && turnSteps.map(renderStep)}
+          {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
         </Box>
       )
     }
 
+    const othersOpen = isOpen('o:others', false)
+
     return (
       <Box flexDirection="column">
-        <Text dimColor>
-          {`${allTurns.length} turns · ${stepList.length} steps · ${callList.length} tool calls · ${failed} failed/denied`}
-        </Text>
+        <Box {...fit(0)}>
+          <Text dimColor wrap="truncate-end">
+            {[
+              plural(allTurns.length, 'turn', 'turns'),
+              plural(stepList.length, 'step', 'steps'),
+              plural(callList.length, 'tool call', 'tool calls'),
+              `${failed} failed`,
+            ].join(' · ')}
+          </Text>
+        </Box>
         {allTurns.length === 0 && orphans.length === 0 && (
           <Text dimColor>Nothing yet: send a prompt and watch it unfold here.</Text>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}
         {orphans.length > 0 && (
           <Box key="orphans" flexDirection="column" marginTop={1}>
-            <Text bold>Other tool calls</Text>
-            <Text dimColor>Not tied to a recorded step (raised by a plugin, or before Glass Box loaded).</Text>
-            {orphans.map(call => renderCall(call, true))}
+            <Box flexDirection="row" gap={1}>
+              <Button key="o:others" plain dimColor label={othersOpen ? '▾' : '▸'} onPress={toggle('o:others')} />
+              <Box {...fit(2)}>
+                <Text wrap="truncate-end">
+                  <Text bold>Other tool calls</Text>
+                  <Text dimColor>{' · not tied to a recorded step'}</Text>
+                </Text>
+              </Box>
+            </Box>
+            {orphans.map(call => (
+              <Box key={`row-${call.id}`} flexDirection="column">
+                {callLine(call, 2, true)}
+                {othersOpen && callDetail(call, 2)}
+              </Box>
+            ))}
           </Box>
         )}
       </Box>

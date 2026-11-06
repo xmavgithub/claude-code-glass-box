@@ -15,35 +15,40 @@ It is the opposite of a black box: a way to review, debug and learn from an
 agent's process instead of trusting only its final answer.
 
 ```text
-3 turns · 9 steps · 14 tool calls · 1 failed/denied
+3 turns · 9 steps · 14 tool calls · 1 failed
 
-▾ ● Turn 14:02:11 · 2 steps · 3 tools · … · running
+▾ ● Turn · 14:02 · 2 steps · 4 tools · ctx 42.2k · running
   “add a license and push the repo”
-  ▸ ✓ Step 1 opus-5-5 high · 3.1s · 42.2k in · 340 out · → tools
-    I'll check the repository state first.
-    ▸ ✓ Bash 412ms allowed by Bash(git:*)
-      git status
-    ▸ ✓ Read 9ms allowed
-      /Users/me/project/LICENSE
-    ▸ ⊘ Write 3ms denied by Write(/etc/**)
-      /etc/hosts
-  ▸ ● Step 2 opus-5-5 high · … · running
-▸ ✓ Turn 13:58:40 · 2 steps · 3 tools · 9.7s · answered
+
+  ▸ ✓ Step 1 · opus-5-5 high · 3.1s · out 340 · → tools
+    › I'll check the repository state first.
+    ✓ Bash  412ms  Bash(git:*)  git status
+    ✓ Read  9ms  allowed  LICENSE
+    ✓ scan_secrets ·plugin-authoring  96ms  ~/project
+    ⊘ Write  3ms  denied · Write(/etc/**)  /etc/hosts
+
+  ▸ ● Step 2 · running
+
+▸ ✓ Turn · 13:58 · 2 steps · 3 tools · ctx 40.1k · 9.7s
   “run the tests”
 ```
 
-Click any `▸` to expand a turn, a step or a tool call (or give the pane the
-keyboard, then use Tab and Enter).
+Click a `▸` to open a turn or a step (or give the pane the keyboard, then use
+Tab and Enter). An open step shows its full text, its token breakdown and,
+under each of its tool calls, the call's input, output and permission verdict.
 
-Status marks: `●` running, `✓` done, `✗` failed, `⊘` denied.
+Status marks: `●` running, `✓` done, `✗` failed, `⊘` denied. Color is kept
+for what needs attention (failures, denials, a call waiting for approval);
+routine verdicts are drawn dim. Paths are shown relative to the project, the
+home folder as `~`, and MCP tools by their own name followed by their server.
 
 ## What it shows
 
 | Level | What you see | Expanded |
 | --- | --- | --- |
-| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, duration, outcome | Its steps |
-| **Step** | One request to the model: model and effort, duration, context tokens in, output tokens, why it stopped, the first line of what it wrote | The full text, the exact token breakdown (input, cache read, cache write, output), message count, server-side tools such as the advisor |
-| **Tool call** | Status, tool, duration, permission verdict, main argument (command, file, pattern, URL...) | Full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
+| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome | Its steps |
+| **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
+| **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), main argument | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. A header line counts turns,
 steps, tool calls and failures for the session. Tool calls that no recorded

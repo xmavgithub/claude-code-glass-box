@@ -6,6 +6,22 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- A denser, calmer layout. Each tool call is one line, and its details open
+  with its step: only turns and steps have a toggle, so the desktop and
+  VS Code panes no longer show a button on every row.
+- Lines are truncated with "…" to the pane's width on the terminal instead of
+  running past its edge.
+- Verdicts read as outcomes: an ask shows "approved", "rejected" or "awaiting
+  approval"; routine verdicts are dim and color is kept for what needs
+  attention.
+- Paths are relative to the project (home as `~`), MCP tools show their own
+  name and their server, and an MCP call's summary is its first argument
+  instead of raw JSON.
+- Steps show output tokens; the context size moves to the turn's header, and
+  the model only where it changes.
+
 ## [0.2.1] - 2026-11-06
 
 ### Fixed
