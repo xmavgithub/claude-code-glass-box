@@ -6,6 +6,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Tabs inside the pane: **Timeline** and **Stats** (hotkeys `1` and `2` while
+  the pane has the keyboard). Stats sums up the session: calls, failures and
+  time per tool; what the permission checks came to and which settings rules
+  allowed the most calls; model steps, time in the model against time in
+  tools, output tokens, peak context and cache share, stop reasons, models.
+
 ### Changed
 
 - A denser, calmer layout. Each tool call is one line, and its details open

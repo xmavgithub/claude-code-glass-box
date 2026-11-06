@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
-import type { CallStatus, Step, ToolCall, Turn, Usage, Verdict } from '../types'
+import type { CallStatus, Step, ToolCall, Turn, Usage, Verdict, View } from '../types'
 
 const PANE = 'glass-box'
 const TITLE = 'Glass Box'
@@ -27,6 +27,12 @@ const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
 const toggled = atom({ plugin: 'glass-box', key: 'toggled' } as const, [], {
   shape: 'toggled-1',
 })
+const view = atom({ plugin: 'glass-box', key: 'view' } as const, 'timeline', { shape: 'view-1' })
+
+const TABS: readonly { id: View; label: string; hotkey: string }[] = [
+  { id: 'timeline', label: 'Timeline', hotkey: '1' },
+  { id: 'stats', label: 'Stats', hotkey: '2' },
+]
 
 // The session's working directory, to show paths relative to it. Set at
 // session.start, which runs again on every reload.
@@ -165,25 +171,41 @@ const STOP_REASON: Record<string, string> = {
   model_context_window_exceeded: 'context full',
 }
 
-/**
- * What the permission check came to, in a word or two. Routine outcomes have
- * no color (drawn dim); only what deserves attention is colored.
- */
-function verdictOutcome(v: Verdict | undefined, call: ToolCall): { label: string; color?: string } | null {
-  if (v === undefined) return null
-  if (v.decision === 'deny') {
-    return { label: v.rule !== null ? `denied · ${v.rule}` : 'denied', color: 'error' }
-  }
+/** What the permission check on a call came to. */
+type VerdictKind = 'rule' | 'hook' | 'allowed' | 'approved' | 'rejected' | 'awaiting' | 'denied' | 'none'
+
+function verdictKind(v: Verdict | undefined, call: ToolCall): VerdictKind {
+  if (v === undefined) return 'none'
+  if (v.decision === 'deny') return 'denied'
   if (v.decision === 'ask') {
-    if (call.status === 'running') return { label: 'awaiting approval', color: 'warning' }
+    if (call.status === 'running') return 'awaiting'
     // A refused ask reaches the model as an error result, not as a deny.
     const refused = /^Permission to use .+ (has been|was) denied/.test(call.output)
-    if (call.status === 'denied' || refused) return { label: 'rejected', color: 'error' }
-    return { label: 'approved' }
+    return call.status === 'denied' || refused ? 'rejected' : 'approved'
   }
-  if (v.rule !== null) return { label: v.rule }
-  if (v.hook !== null) return { label: 'hook' }
-  return { label: 'allowed' }
+  return v.rule !== null ? 'rule' : v.hook !== null ? 'hook' : 'allowed'
+}
+
+/**
+ * The verdict in a word or two. Routine outcomes have no color (drawn dim);
+ * only what deserves attention is colored.
+ */
+function verdictOutcome(v: Verdict | undefined, call: ToolCall): { label: string; color?: string } | null {
+  const kind = verdictKind(v, call)
+  switch (kind) {
+    case 'none':
+      return null
+    case 'denied':
+      return { label: v?.rule != null ? `denied · ${v.rule}` : 'denied', color: 'error' }
+    case 'awaiting':
+      return { label: 'awaiting approval', color: 'warning' }
+    case 'rejected':
+      return { label: 'rejected', color: 'error' }
+    case 'rule':
+      return { label: v?.rule ?? 'rule' }
+    default:
+      return { label: kind }
+  }
 }
 
 async function patchStep($: EngineInterface, key: string, patch: (step: Step) => Step) {
@@ -388,12 +410,13 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [turnList, stepList, callList, verdictList, toggledList] = await Promise.all([
+    const [turnList, stepList, callList, verdictList, toggledList, current] = await Promise.all([
       read($, turns),
       read($, steps),
       read($, calls),
       read($, verdicts),
       read($, toggled),
+      read($, view),
     ])
 
     const columns = e.props.bodyColumns
@@ -618,8 +641,141 @@ export const register: Register = on => {
 
     const othersOpen = isOpen('o:others', false)
 
+    // --- Stats: the session at a glance, from what Glass Box keeps.
+
+    const line = (key: string, label: string, value: string, labelWidth: number) => (
+      <Box key={key} paddingLeft={2} {...fit(2)}>
+        <Text wrap="truncate-end">
+          <Text>{e.surface === 'terminal' ? label.padEnd(labelWidth) : label}</Text>
+          <Text dimColor>{`  ${value}`}</Text>
+        </Text>
+      </Box>
+    )
+    const section = (title: string) => (
+      <Box key={`section-${title}`} marginTop={1}>
+        <Text bold>{title}</Text>
+      </Box>
+    )
+
+    const renderStats = () => {
+      const byTool = new Map<string, ToolCall[]>()
+      for (const call of callList) {
+        const list = byTool.get(call.tool) ?? []
+        list.push(call)
+        byTool.set(call.tool, list)
+      }
+      const toolRows = [...byTool.entries()]
+        .map(([tool, list]) => {
+          const { name, server } = toolName(tool)
+          const done = list.filter(c => c.durationMs !== null)
+          const total = done.reduce((ms, c) => ms + (c.durationMs ?? 0), 0)
+          const failures = list.filter(c => c.status === 'error' || c.status === 'denied').length
+          return {
+            label: server === null ? name : `${name} ·${server}`,
+            count: list.length,
+            value: [
+              plural(list.length, 'call', 'calls'),
+              failures > 0 ? `${failures} failed` : null,
+              formatDuration(total),
+              done.length > 0 ? `avg ${formatDuration(Math.round(total / done.length))}` : null,
+            ]
+              .filter(part => part !== null)
+              .join(' · '),
+          }
+        })
+        .sort((a, b) => b.count - a.count)
+      const labelWidth = Math.min(24, Math.max(4, ...toolRows.map(r => r.label.length)))
+
+      const kinds = new Map<VerdictKind, number>()
+      for (const call of callList) {
+        const kind = verdictKind(verdictById.get(call.id), call)
+        kinds.set(kind, (kinds.get(kind) ?? 0) + 1)
+      }
+      const KIND_LABEL: Record<VerdictKind, string> = {
+        rule: 'by a settings rule',
+        hook: 'by a hook',
+        allowed: 'allowed by the mode or the tool',
+        approved: 'asked, then approved',
+        rejected: 'asked, then rejected',
+        awaiting: 'awaiting approval',
+        denied: 'denied',
+        none: 'no verdict recorded',
+      }
+      const ruleCounts = new Map<string, number>()
+      for (const v of verdictList) {
+        if (v.rule !== null) ruleCounts.set(v.rule, (ruleCounts.get(v.rule) ?? 0) + 1)
+      }
+
+      const finished = stepList.filter(s => s.durationMs !== null)
+      const modelMs = finished.reduce((ms, s) => ms + (s.durationMs ?? 0), 0)
+      const toolMs = callList.reduce((ms, c) => ms + (c.durationMs ?? 0), 0)
+      const output = stepList.reduce((n, s) => n + (s.usage?.output ?? 0), 0)
+      const peak = Math.max(0, ...stepList.map(s => (s.usage === null ? 0 : contextTokens(s.usage))))
+      const cached = stepList.reduce((n, s) => n + (s.usage?.cacheRead ?? 0), 0)
+      const context = stepList.reduce((n, s) => n + (s.usage === null ? 0 : contextTokens(s.usage)), 0)
+      const stops = new Map<string, number>()
+      for (const s of finished) {
+        const label = s.stopReason === null ? 'no response' : STOP_REASON[s.stopReason] ?? s.stopReason
+        stops.set(label, (stops.get(label) ?? 0) + 1)
+      }
+      const models = new Map<string, number>()
+      for (const s of stepList) models.set(shortModel(s.model), (models.get(shortModel(s.model)) ?? 0) + 1)
+
+      if (callList.length === 0 && stepList.length === 0) {
+        return <Text dimColor>No activity recorded yet.</Text>
+      }
+
+      return (
+        <Box flexDirection="column">
+          {section('Tools')}
+          {toolRows.length === 0 && line('tools-none', 'none yet', '', 8)}
+          {toolRows.map(row => line(`tool-${row.label}`, row.label, row.value, labelWidth))}
+
+          {section('Permissions')}
+          {[...kinds.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([kind, n]) => line(`kind-${kind}`, `${n}`, KIND_LABEL[kind], 4))}
+          {[...ruleCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8)
+            .map(([rule, n]) => line(`rule-${rule}`, `${n}`, `rule ${rule}`, 4))}
+
+          {section('Model')}
+          {line('m-steps', 'steps', `${stepList.length}${finished.length > 0 ? ` · avg ${formatDuration(Math.round(modelMs / finished.length))}` : ''}`, 13)}
+          {line('m-time', 'time', `${formatDuration(modelMs)} in the model · ${formatDuration(toolMs)} in tools`, 13)}
+          {line('m-out', 'output', `${formatTokens(output)} tokens`, 13)}
+          {line('m-ctx', 'context', `peak ${formatTokens(peak)}${context > 0 ? ` · ${Math.round((cached / context) * 100)}% from cache` : ''}`, 13)}
+          {line('m-stop', 'stops', [...stops.entries()].map(([label, n]) => `${label} ${n}`).join(' · ') || '—', 13)}
+          {line('m-models', 'models', [...models.entries()].map(([m, n]) => `${m} ${n}`).join(' · ') || '—', 13)}
+          <Box paddingLeft={2} marginTop={1} {...fit(2)}>
+            <Text dimColor wrap="wrap">
+              {`Over what Glass Box keeps: the last ${MAX_TURNS} turns and ${MAX_CALLS} tool calls. Time in tools adds up calls that ran in parallel.`}
+            </Text>
+          </Box>
+        </Box>
+      )
+    }
+
+    const tabBar = (
+      <Box flexDirection="row" gap={1} marginBottom={1}>
+        {TABS.map(tab =>
+          tab.id === current ? (
+            <Button key={`v:${tab.id}`} variant="primary" hotkey={tab.hotkey} label={tab.label} onPress={() => undefined} />
+          ) : (
+            <Button
+              key={`v:${tab.id}`}
+              hotkey={tab.hotkey}
+              label={tab.label}
+              onPress={() => void quietly(() => update($, view, () => tab.id))}
+            />
+          ),
+        )}
+      </Box>
+    )
+
     return (
       <Box flexDirection="column">
+        {tabBar}
         <Box {...fit(0)}>
           <Text dimColor wrap="truncate-end">
             {[
@@ -630,6 +786,13 @@ export const register: Register = on => {
             ].join(' · ')}
           </Text>
         </Box>
+        {current === 'stats' ? renderStats() : renderTimeline()}
+      </Box>
+    )
+
+    function renderTimeline() {
+      return (
+        <Box flexDirection="column">
         {allTurns.length === 0 && orphans.length === 0 && (
           <Text dimColor>Nothing yet: send a prompt and watch it unfold here.</Text>
         )}
@@ -653,7 +816,8 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-      </Box>
-    )
+        </Box>
+      )
+    }
   })
 }

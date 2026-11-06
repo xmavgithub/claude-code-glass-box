@@ -1,3 +1,6 @@
+/** The pane's tabs. */
+export type View = 'timeline' | 'stats'
+
 /** The state of a timeline item: a turn, a step or a tool call. */
 export type CallStatus = 'running' | 'ok' | 'error' | 'denied'
 
@@ -89,6 +92,8 @@ declare module 'claude-code' {
       verdicts: Shaped<Verdict[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
+      /** The tab the pane shows. */
+      view: Shaped<View>
     }
   }
 }

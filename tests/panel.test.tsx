@@ -203,6 +203,49 @@ test('only the newest turn is open; an older one opens on a click', async ($, on
   await ui.unmount()
 })
 
+test('the Stats tab sums up tools, permissions and the model', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 1000) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'tool', index: 0, id: 'toolu_1', name: 'Bash' } as const
+    yield { kind: 'tool', index: 1, id: 'toolu_2', name: 'Bash' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: USAGE } as const
+  })
+  on('tool.check', () => ({ decision: 'allow', rule: 'Bash(ls:*)' }) as const)
+  on('tool.call', (_, e) =>
+    e.tool_use_id === 'toolu_2' ? { result: {}, text: 'boom', isError: true } : { result: {}, text: 'ok' },
+  )
+
+  await $.turn.start({ turnId: 'T1', text: 'go' })
+  const step = $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  for await (const _chunk of step) {
+    // drain
+  }
+  for (const id of ['toolu_1', 'toolu_2']) {
+    await $.tool.check({ tool: 'Bash', input: { command: 'ls' }, tool_use_id: id } as never)
+    await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: id })
+  }
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: 'Tools' })).toBeUndefined()
+
+    await ui.press({ key: 'v:stats' })
+    const all = await texts(ui)
+    expect(all).toContain('Tools')
+    expect(has(all, /^Bash *  2 calls · 1 failed · 2\.0s · avg 1\.0s$/)).toBe(true)
+    expect(has(all, /^2 *  by a settings rule$/)).toBe(true)
+    expect(has(all, /^2 *  rule Bash\(ls:\*\)$/)).toBe(true)
+    expect(has(all, /^output *  340 tokens$/)).toBe(true)
+    expect(has(all, /^context *  peak 42\.2k · 97% from cache$/)).toBe(true)
+
+    await ui.press({ key: 'v:timeline' })
+    expect(await ui.find({ type: 'Text', text: 'Tools' })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
 test('a value an earlier version stored is declined', async ($, on) => {
   on('state.get', () => ({ value: { value: [{ tool: 'Bash' }], version: 1 } }))
 
