@@ -826,3 +826,33 @@ test('each turn says where its message came from, what a hook changed, and what 
     await ui.unmount()
   }
 })
+
+test('the Prompt tab lists the plugins seen at work, and not plain MCP servers', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('tool.describe', (_, e) => ({ description: e.description, isDeferred: e.isDeferred }))
+  on('skill.prompt', (_, e) => ({ text: `Instructions of ${e.skill}.` }))
+
+  // plugin.register cannot be raised from a test (a mod joins at load): the
+  // mods' rows are covered by the type check, the rest here.
+  await $.tool.describe({ tool: 'scan_secrets', description: 'Scans.', provider: { plugin: 'plugin-authoring', tier: 'user' } } as never)
+  await $.tool.describe({ tool: 'mcp__gmail__search', description: 'Mail.', isDeferred: true, provider: { plugin: 'mcp:gmail', tier: 'user' } } as never)
+  await $.skill.prompt({ skill: 'review', source: 'plugin', pluginName: 'code-tools', text: 'raw', frontmatter: {} } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'v:instructions' })
+    const all = await texts(ui)
+    expect(all).toContain('Plugins in the loop')
+    expect(has(all, /^plugin-authoring · 1 tool$/)).toBe(true)
+    expect(has(all, /^code-tools · 1 skill$/)).toBe(true)
+    // A plain MCP server is listed with the tools, not as a plugin.
+    expect(has(all, /^gmail · /)).toBe(false)
+
+    await ui.press({ key: 'n:p:plugin-authoring' })
+    expect(await texts(ui)).toContain('Tools: scan_secrets.')
+    await ui.press({ key: 'n:p:plugin-authoring' })
+    await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})

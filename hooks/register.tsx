@@ -8,6 +8,7 @@ import type {
   Compaction,
   ContextSnapshot,
   Injection,
+  ModInfo,
   OfferedTool,
   PromptSnapshot,
   Resources,
@@ -92,6 +93,9 @@ const MAX_AGENTS = 100
 // Every message that entered the session, with where it came from.
 const messages = atom({ plugin: 'glass-box', key: 'messages' } as const, [], { shape: 'messages-1' })
 const MAX_MESSAGES = 100
+// The hooks modules that joined the chain after Glass Box, as scanned.
+const mods = atom({ plugin: 'glass-box', key: 'mods' } as const, [], { shape: 'mods-1' })
+const MAX_MODS = 50
 // How soon a message sent to an idle session starts its turn, at most.
 const IDLE_START_MS = 30_000
 // The /context-style breakdown is estimated locally: at most this often.
@@ -622,6 +626,31 @@ export const register: Register = on => {
 
     return { text: 'Glass Box opened.' }
   })
+
+  // A hooks module joining the chain: what it hooks and calls, as the engine
+  // scanned it. The engine raises this only to modules loaded before the one
+  // joining, so a mod loaded before Glass Box is seen by what it does alone.
+  on('plugin.register', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const record: ModInfo = {
+        name: e.name,
+        tier: e.tier,
+        provenance: e.provenance,
+        version: e.version ?? null,
+        root: e.root,
+        events: [...e.uses.events],
+        calls: [...e.uses.calls],
+        envReads: [...(e.uses.env?.reads ?? [])],
+        envWrites: [...(e.uses.env?.writes ?? [])],
+        at: await now($),
+        refused: answer.refuse ?? null,
+      }
+      await update($, mods, list => [...list.filter(m => m.name !== record.name), record].slice(-MAX_MODS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
 
   // Every message entering the session, from you or anything else, with the
   // origin the engine stamps on it. Recorded before `next`: the turn it starts
@@ -1166,7 +1195,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1177,6 +1206,7 @@ export const register: Register = on => {
         read($, compactions),
         read($, agents),
         read($, messages),
+        read($, mods),
       ])
 
     const columns = e.props.bodyColumns
@@ -2343,6 +2373,84 @@ export const register: Register = on => {
       </Box>
     )
 
+    // --- Plugins in the loop: who besides Claude Code can act in the session.
+
+    const renderPlugins = () => {
+      type Seen = { mod: ModInfo | null; tools: string[]; skills: Set<string>; verdicts: number }
+      const seen = new Map<string, Seen>()
+      const of = (name: string) => {
+        const entry = seen.get(name) ?? { mod: null, tools: [], skills: new Set<string>(), verdicts: 0 }
+        seen.set(name, entry)
+        return entry
+      }
+      for (const mod of modList) of(mod.name).mod = mod
+      for (const tool of toolList) {
+        // Built-ins are the engine's; a plain MCP server is listed with the tools.
+        const fromServer = /^mcp:plugin:([^:]+):/.exec(tool.provider)?.[1]
+        const name = fromServer ?? (tool.provider === 'engine' || tool.provider.startsWith('mcp:') ? null : tool.provider)
+        if (name !== null) of(name).tools.push(toolName(tool.tool).name)
+      }
+      for (const load of skillList) if (load.plugin !== null) of(load.plugin).skills.add(load.skill)
+      for (const verdict of verdictList) if (verdict.plugin !== null) of(verdict.plugin).verdicts += 1
+      const rows = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+
+      return (
+        <Box flexDirection="column">
+          {section('Plugins in the loop')}
+          {para(
+            'n-plugins',
+            'Who besides Claude Code acts in this session. Mods (hooks modules) are listed with what they hook and call, as the engine scanned them; other plugins by what Glass Box saw them do: the tools they provide, the skills they load, the permission checks they decide.',
+            true,
+          )}
+          {para(
+            'n-plugins-limit',
+            'The engine tells a mod only of the mods loaded after it, and Glass Box may load late: a mod loaded before it shows here only by what it does. Context a plugin adds does not say which plugin added it.',
+            true,
+          )}
+          {rows.length === 0 && para('n-plugins-none', 'None seen yet.', true)}
+          {rows.map(([name, p]) => {
+            const parts = [
+              p.mod !== null ? `mod, ${p.mod.tier}` : null,
+              p.mod !== null && p.mod.refused !== null ? 'refused' : null,
+              p.mod !== null ? plural(p.mod.events.length, 'event hooked', 'events hooked') : null,
+              p.tools.length > 0 ? plural(p.tools.length, 'tool', 'tools') : null,
+              p.skills.size > 0 ? plural(p.skills.size, 'skill', 'skills') : null,
+              p.verdicts > 0 ? plural(p.verdicts, 'permission check', 'permission checks') : null,
+            ].filter(part => part !== null)
+
+            return toggleRow(
+              `n:p:${name}`,
+              0,
+              [{ text: name, bold: true }, parts.length > 0 && { text: ` · ${parts.join(' · ')}`, dim: true }],
+              () => (
+                <Box flexDirection="column">
+                  {p.mod !== null &&
+                    para(
+                      `n-pm-${name}`,
+                      [
+                        `A mod${p.mod.version !== null ? ` (version ${p.mod.version})` : ''} from ${p.mod.provenance}, in ${tidy(p.mod.root)}, joined at ${formatTime(p.mod.at)} in the ${p.mod.tier} tier.`,
+                        p.mod.refused !== null ? `A plugin refused it: ${p.mod.refused}.` : null,
+                        `It hooks: ${p.mod.events.join(', ') || 'nothing'}.`,
+                        `It calls: ${p.mod.calls.join(', ') || 'nothing'}.`,
+                        p.mod.envReads.length + p.mod.envWrites.length > 0
+                          ? `Environment: reads ${p.mod.envReads.join(', ') || 'none'}; writes ${p.mod.envWrites.join(', ') || 'none'}.`
+                          : null,
+                      ]
+                        .filter(line => line !== null)
+                        .join(' '),
+                      true,
+                    )}
+                  {p.tools.length > 0 && para(`n-pt-${name}`, `Tools: ${p.tools.join(', ')}.`, true)}
+                  {p.skills.size > 0 && para(`n-ps-${name}`, `Skills loaded: ${[...p.skills].join(', ')}.`, true)}
+                  {p.verdicts > 0 && para(`n-pv-${name}`, `Decided ${plural(p.verdicts, 'permission check', 'permission checks')} on tool calls.`, true)}
+                </Box>
+              ),
+            )
+          })}
+        </Box>
+      )
+    }
+
     const renderInstructions = () => {
       const latestFirst = [...promptList].sort((a, b) => b.at - a.at)
       const loaded = toolList.filter(t => !t.deferred)
@@ -2464,6 +2572,8 @@ export const register: Register = on => {
                 </Box>
               ),
             )}
+
+          {renderPlugins()}
 
           {section('Skills loaded')}
           {para('n-skills', 'A skill is a packaged set of instructions Claude loads when a task needs it; its text then joins the conversation.', true)}

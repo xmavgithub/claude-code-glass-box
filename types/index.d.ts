@@ -121,6 +121,27 @@ export type Submission = {
   dropped: string | null
 }
 
+/** A hooks module (a mod) joining the chain, as the engine scanned it. */
+export type ModInfo = {
+  name: string
+  /** Where its hooks stand among the chain's tiers: managed, user, project… */
+  tier: string
+  /** Where it came from: `<name>@<marketplace>`, `<name>@inline`… */
+  provenance: string
+  version: string | null
+  /** Its directory, as given. */
+  root: string
+  /** The events its `on(...)` names, in order. */
+  events: string[]
+  /** What it calls on `$`, as `noun.method`. */
+  calls: string[]
+  envReads: string[]
+  envWrites: string[]
+  at: number
+  /** Why a plugin refused it; null when it joined. */
+  refused: string | null
+}
+
 /** One section of the system prompt, as it was sent. */
 export type PromptPart = {
   id: string
@@ -378,6 +399,7 @@ declare module 'claude-code' {
       compactions: Shaped<Compaction[]>
       agents: Shaped<Spawn[]>
       messages: Shaped<Submission[]>
+      mods: Shaped<ModInfo[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

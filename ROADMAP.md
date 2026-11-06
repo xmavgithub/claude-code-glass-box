@@ -111,7 +111,7 @@ operations on `$`) against what Glass Box records. In order of value:
   as Slack, the phone: the engine's own `origin`, in place of reading the
   frame around the text. And when a hook changed your message before the
   model read it (`prompt.submit`).
-- [ ] **Plugins in the loop.** Which plugins and mods are loaded, from where,
+- [x] **Plugins in the loop.** Which plugins and mods are loaded, from where,
   and what each one hooks and calls: who can change what happens
   (`plugin.register`).
 - [ ] **Messages between agents.** What an agent sends to another

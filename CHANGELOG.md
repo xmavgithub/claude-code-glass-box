@@ -31,7 +31,11 @@ everything below is on `main`. 1.0 will be released when the criteria in
   (`prompt.compose`); the blocks in front of the first message and the
   CLAUDE.md files behind them, with their kind and imports
   (`prompt.context`); the tools offered, loaded in full or behind ToolSearch,
-  by provider (`tool.describe`); the skills loaded (`skill.prompt`).
+  by provider (`tool.describe`); the plugins in the loop: mods with their
+  tier, provenance and what they hook and call on `$` (`plugin.register`),
+  other plugins by the tools, skills and permission checks they provide,
+  with the limit said (a mod loaded before Glass Box shows only by what it
+  does); the skills loaded (`skill.prompt`).
 - **Context**: how full the context window is and what fills it, as
   /context counts it (system prompt, tools, memory files, MCP servers,
   messages, free space, the auto-compaction threshold), with a Refresh
