@@ -91,7 +91,7 @@ In the Timeline:
 | Level | What you see | Expanded |
 | --- | --- | --- |
 | **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by what started it: a background subagent's report, another agent's message, a background task's end | Its steps; for a turn you did not type, how it started and its whole text, frame included, as the model read it |
-| **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of what it wrote | The full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
+| **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of its thinking (`∴`) and of what it wrote (`›`) | Its thinking as it streamed, with its size, the full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
 | **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
 | **Subagent** | Under the Agent call that started it: its type, the model it runs on, steps, tool calls, duration, cost, and whether it is a fork, runs in the background, is a teammate or a workflow's agent. Open while it works | What kind of agent it is, the model the call asked for, the permission mode it inherits, the prompt it was given, and its own turns, steps and tool calls (and the subagents it starts, nested again) |
@@ -148,7 +148,7 @@ not installed.
 | Event | What Glass Box records |
 | --- | --- |
 | `turn.start` / `turn.complete` | The prompt, the loop (main or subagent), duration, outcome, usage |
-| `turn.step` (streamed) | Model, effort, message count; then the text, tokens and stop reason. The stream's `tool` chunks carry the `tool_use_id`s that tie a step to its tool calls |
+| `turn.step` (streamed) | Model, effort, message count; then the text, tokens and stop reason. The stream's `tool` chunks carry the `tool_use_id`s that tie a step to its tool calls; its `thinking` chunks, the model's thinking |
 | `tool.check` | The permission verdict and what decided it |
 | `tool.call` | Arguments, result text, error or deny, duration |
 | `agent.spawn` | A subagent starting: the call that started it (its `tool_use_id`), type, prompt, the model asked for and the one resolved, fork, background, teammate, workflow. Its `agentId` ties it to its turns |
@@ -161,12 +161,15 @@ not installed.
   contents or command output you would not want on a shared screen.
 - To stay light it keeps the last 30 turns, 300 tool calls and 200 items of
   added context, and clips long texts (prompts at 600 characters, step text at
-  1,200, inputs at 2,000, outputs at 1,500, added context at 4,000). **Clear**
-  empties it at any time.
+  1,200, thinking at 3,000, inputs at 2,000, outputs at 1,500, added context at
+  4,000). **Clear** empties it at any time.
 
 ## Limitations
 
-- Extended thinking is not shown yet (see the roadmap).
+- Thinking is shown as Claude Code receives it while the step streams: it
+  may be a summary of the model's reasoning, and a step may think without
+  any text of it being sent. When none came, Glass Box cannot tell whether the
+  model did not think or its thinking was left out, and says so.
 - Server-side tools such as the advisor run inside the model request: Glass Box
   shows their input and result as the transcript keeps them, read back once
   the step is over, but not how they worked inside. The advisor's model is the
@@ -179,7 +182,7 @@ not installed.
 
 Glass Box is in development towards 1.0, with no releases before then. See
 [ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held to,
-what is done, and the milestones ahead, next the model's reasoning.
+what is done, and what comes next.
 Discussion and pull requests are welcome.
 
 ## Development

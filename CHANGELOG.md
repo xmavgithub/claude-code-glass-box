@@ -79,6 +79,11 @@ everything below is on `main`. 1.0 will be released when the criteria in
   turns, steps and tool calls, nested again for agents it starts. It stays
   open while it works (`agent.spawn`). A subagent's turn whose call Glass Box
   did not record stays at the top level and says why.
+- **Thinking**: under each step, `∴` and the first line of the model's
+  thinking; open, all of it as it streamed (up to 3,000 characters, with the
+  total), live while the step runs. It is said that it may be a summary, and
+  a step with no thinking says Glass Box cannot tell whether the model did
+  not think or its thinking was not sent (`turn.step` thinking chunks).
 - **Turns you did not type** are named by what started them: "Report from
   subagent Explore" when a background agent hands its final report to the
   main loop, "Message from another agent", "Background task ended". The

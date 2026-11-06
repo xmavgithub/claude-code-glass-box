@@ -37,7 +37,8 @@ everything added to the model's context), and what the model is told (the
 system prompt, the first message's context blocks and CLAUDE.md files, the
 tools offered, the skills loaded), and the resources (the context window and
 what fills it, cost per session and per turn, rate limits, compactions), and
-who did the work (each subagent under the call that started it). Four
+who did the work (each subagent under the call that started it), and the
+model's thinking at each step. Four
 tabs (Timeline, Stats, Prompt, Context) and a Guide.
 
 ## Next
@@ -94,7 +95,7 @@ Code events they build on.
 
 > "Why did the model do that?"
 
-- [ ] **Thinking excerpts.** Where the model streams its thinking, an excerpt
+- [x] **Thinking excerpts.** Where the model streams its thinking, an excerpt
   per step. What arrives depends on the model and may be summarized or empty;
   the pane will say which.
 

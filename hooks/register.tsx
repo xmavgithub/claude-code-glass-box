@@ -45,11 +45,14 @@ const MAX_SKILLS = 50
 const MAX_SKILL_TEXT = 3000
 const MAX_TOOLS = 400
 const MAX_SPAWN_PROMPT = 3000
+const MAX_THINKING = 3000
+// Streamed thinking is written to the state at most this often.
+const THINKING_EVERY_MS = 1000
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
 const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-3' })
-const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-2' })
+const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-3' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
   shape: 'verdicts-1',
@@ -658,6 +661,9 @@ export const register: Register = on => {
       serverTools: [],
       stopReason: null,
       usage: null,
+      thought: false,
+      thinking: '',
+      thinkingChars: 0,
     }
     await quietly(() =>
       update($, steps, list => [...list.filter(s => s.key !== key), step].slice(-MAX_STEPS)),
@@ -665,8 +671,26 @@ export const register: Register = on => {
 
     const stream = next(e)
     let result: Awaited<typeof stream.result> | undefined
+    // The thinking as it streams: kept here, written at most once a second.
+    let thinking = ''
+    let thinkingChars = 0
+    let thought = false
+    let thinkingAt = 0
+    // Clipped with "…" alone: the total is kept apart, in thinkingChars.
+    const shownThinking = () => (thinking.length > MAX_THINKING ? `${thinking.slice(0, MAX_THINKING)}…` : thinking)
     try {
       for await (const chunk of stream) {
+        if (chunk.kind === 'thinking') {
+          thought = true
+          thinkingChars += chunk.text.length
+          if (thinking.length <= MAX_THINKING) thinking += chunk.text
+          if (Date.now() - thinkingAt > THINKING_EVERY_MS) {
+            thinkingAt = Date.now()
+            const text = shownThinking()
+            const chars = thinkingChars
+            await quietly(() => patchStep($, key, s => ({ ...s, thought: true, thinking: text, thinkingChars: chars })))
+          }
+        }
         if (chunk.kind === 'tool') {
           const id = chunk.id
           await quietly(() =>
@@ -687,6 +711,9 @@ export const register: Register = on => {
         patchStep($, key, s => ({
           ...s,
           durationMs: Math.round(endedAt - startedAt),
+          thought,
+          thinking: shownThinking(),
+          thinkingChars,
           ...(done === undefined
             ? { stopReason: null }
             : {
@@ -1434,6 +1461,24 @@ export const register: Register = on => {
               ])}
             </Box>
           </Box>
+          {step.thought && !open && (
+            <Box paddingLeft={2} {...fit(4)}>
+              <Text dimColor italic wrap="truncate-end">
+                {`∴ ${step.thinking === '' ? '(thought, with no text sent)' : cut(firstLine(step.thinking), room(8))}`}
+              </Text>
+            </Box>
+          )}
+          {step.thought && open && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(4)}>
+              <Text color="suggestion">{`thinking · ${formatTokens(step.thinkingChars)} chars as streamed${isRunning ? ' so far' : ''}`}</Text>
+              <Text dimColor wrap="wrap">
+                What the model wrote while thinking, before answering, as Claude Code received it. It may be a summary of the model’s reasoning rather than all of it.
+              </Text>
+              <Text dimColor italic wrap="wrap">
+                {step.thinking === '' ? '(the model thought, but no text of its thinking was sent: it can be left out or redacted)' : step.thinking}
+              </Text>
+            </Box>
+          )}
           {step.answer !== '' && (
             <Box paddingLeft={2} {...fit(4)}>
               <Text dimColor italic wrap={open ? 'wrap' : 'truncate-end'}>
@@ -1449,6 +1494,11 @@ export const register: Register = on => {
               {step.usage !== null && (
                 <Text dimColor wrap="wrap">
                   {`tokens: ${formatTokens(contextTokens(step.usage))} context (${formatTokens(step.usage.cacheRead)} cached, ${formatTokens(step.usage.cacheWrite)} written, ${formatTokens(step.usage.input)} new) · ${formatTokens(step.usage.output)} output`}
+                </Text>
+              )}
+              {!step.thought && !isRunning && (
+                <Text dimColor wrap="wrap">
+                  No thinking was streamed in this step: the model did not think, or its thinking was not sent. Glass Box cannot tell which.
                 </Text>
               )}
             </Box>
@@ -1828,6 +1878,7 @@ export const register: Register = on => {
           {term('g-w2', 'Context.', 'Everything the model reads at a step: instructions, the conversation, tool results. It grows step after step; when it is nearly full, Claude Code compacts it into a summary.')}
           {term('g-w3', 'Cache.', 'The part of the context the model already read on an earlier step. Reading it again is cheaper and faster.')}
           {term('g-w4', 'Effort.', 'How much the model is asked to think before it writes.')}
+          {term('g-w19', 'Thinking.', 'What the model writes to itself before it answers or calls a tool. Under each step, ∴ marks it. It may come as a summary of the model’s reasoning, or not be sent at all.')}
           {term('g-w5', 'Permission rule.', 'A line in your settings, such as Bash(git:*), that allows or denies matching tool calls without asking.')}
           {term('g-w6', 'Hook.', 'A script from your settings or from a plugin that runs around a tool call and can allow, deny or change it.')}
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}

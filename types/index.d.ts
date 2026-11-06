@@ -233,6 +233,12 @@ export type Step = {
   serverTools: ServerTool[]
   stopReason: string | null
   usage: Usage | null
+  /** True when the step streamed any thinking, even with no text. */
+  thought: boolean
+  /** The thinking as it streamed, clipped; "" when none came. */
+  thinking: string
+  /** How many characters of thinking streamed in all. */
+  thinkingChars: number
 }
 
 /**

@@ -718,3 +718,46 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
   expect(has(task, /a background task ended \(Build finished\)/)).toBe(true)
   await last.unmount()
 })
+
+test('a step shows the thinking it streamed, and says so when none came', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  const long = 'x'.repeat(5000)
+  on('turn.step', async function* (_, e) {
+    if (e.index === 0) {
+      yield { kind: 'thinking', index: 0, text: 'I should list the files first.' } as const
+      yield { kind: 'thinking', index: 0, text: '\nThen read the README.' } as const
+      yield { kind: 'text', index: 1, text: 'Listing.' } as const
+    }
+    if (e.index === 1) yield { kind: 'thinking', index: 0, text: long } as const
+    return { turnId: e.turnId, index: e.index, answer: e.index === 2 ? 'Done.' : '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+  })
+
+  await $.turn.start({ turnId: 'T1', text: 'go' })
+  for (const index of [0, 1, 2]) {
+    const step = $.turn.step({ turnId: 'T1', index, model: 'claude-opus-5-5', messageCount: 1 })
+    for await (const _chunk of step) {
+      // drain
+    }
+  }
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const closed = await texts(ui)
+    expect(closed).toContain('∴ I should list the files first.')
+    expect(has(closed, /^∴ x+…$/)).toBe(true)
+
+    await ui.press({ key: 's:T1:0' })
+    await ui.press({ key: 's:T1:1' })
+    await ui.press({ key: 's:T1:2' })
+    const open = await texts(ui)
+    expect(open).toContain('thinking · 52 chars as streamed')
+    expect(open).toContain('I should list the files first.\nThen read the README.')
+    expect(open).toContain('thinking · 5.0k chars as streamed')
+    expect(open).toContain(`${'x'.repeat(3000)}…`)
+    expect(has(open, /^No thinking was streamed in this step/)).toBe(true)
+    for (const key of ['s:T1:0', 's:T1:1', 's:T1:2']) await ui.press({ key })
+    await ui.unmount()
+  }
+})
