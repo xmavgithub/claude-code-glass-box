@@ -30,9 +30,11 @@ Every item below is held to these.
 
 ## Where we are
 
-**0.3.0**: the loop itself. Turns, steps, server tools such as the advisor,
-tool calls and their permission verdicts, in a Timeline; a Stats tab; a How it
-works tab with a legend and a glossary.
+**0.4.0**: the loop itself, and what changes it. Turns, steps, server tools
+such as the advisor, tool calls and their permission verdicts, in a Timeline;
+calls a hook rewrote, with both versions; everything added to the model's
+context besides your message, by source; a Stats tab; a How it works tab with
+a legend and a glossary.
 
 ## Next
 
