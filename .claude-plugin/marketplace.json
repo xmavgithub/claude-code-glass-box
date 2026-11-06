@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-glass-box",
+  "owner": { "name": "Mauro Salvo" },
+  "metadata": {
+    "description": "Glass Box: a live audit pane that shows how Claude Code works, while it works"
+  },
+  "plugins": [
+    {
+      "name": "glass-box",
+      "source": "./",
+      "description": "A live audit pane beside the chat: every turn, model step, permission verdict and tool call Claude Code makes"
+    }
+  ]
+}

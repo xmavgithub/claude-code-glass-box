@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in Glass Box does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not paste secrets: the pane can show tool
+        inputs and outputs, so check any text or screenshot before sharing it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Start a session with ...
+        2. Ask Claude to ...
+        3. Open /glass-box and ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Terminal (fullscreen)
+        - Terminal (main screen / tmux)
+        - VS Code
+        - Desktop app
+        - Mobile
+    validations:
+      required: true
+  - type: input
+    id: glassbox
+    attributes:
+      label: Glass Box version
+      description: The `version` in `.claude-plugin/plugin.json`, or the commit.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Transcript lines or debug log
+      description: Any dim line naming glass-box in the transcript, or lines from `claude --debug`.
+      render: text

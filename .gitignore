@@ -1,0 +1,14 @@
+# Written by Claude Code each time it loads the mod
+.claude-plugin/types/
+.mcpb-cache/
+
+# OS and editors
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Logs and dependencies
+*.log
+node_modules/

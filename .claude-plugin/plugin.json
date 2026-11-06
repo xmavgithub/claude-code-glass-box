@@ -1,0 +1,14 @@
+{
+  "name": "glass-box",
+  "version": "0.2.0",
+  "description": "A live audit pane beside the chat: every turn, model step, permission verdict and tool call Claude Code makes, with inputs, outputs, tokens and timing",
+  "author": {
+    "name": "Mauro Salvo",
+    "url": "https://github.com/xmavgithub"
+  },
+  "homepage": "https://github.com/xmavgithub/claude-code-glass-box",
+  "repository": "https://github.com/xmavgithub/claude-code-glass-box",
+  "license": "MIT",
+  "keywords": ["observability", "audit", "transparency", "tool-calls", "pane", "mod"],
+  "types": "./types/index.d.ts"
+}
