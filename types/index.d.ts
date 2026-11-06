@@ -201,6 +201,25 @@ export type OfferedAgent = {
   offered: boolean
 }
 
+/**
+ * A call another plugin made through `$`: to a model, an MCP server, the
+ * network or a process. Headers, bodies, credentials and environments are
+ * never kept.
+ */
+export type PluginCall = {
+  id: string
+  at: number
+  /** The calling plugin, as the engine names it. */
+  plugin: string
+  op: 'model' | 'mcp' | 'http' | 'process'
+  /** One line: the model and prompt size, server.tool, METHOD host/path, the command. */
+  summary: string
+  /** How it went, in a few words. */
+  outcome: string
+  isError: boolean
+  durationMs: number
+}
+
 /** A hooks module (a mod) joining the chain, as the engine scanned it. */
 export type ModInfo = {
   name: string
@@ -484,6 +503,7 @@ declare module 'claude-code' {
       agentTypes: Shaped<OfferedAgent[]>
       actions: Shaped<Action[]>
       telemetry: Shaped<Telemetry>
+      pluginCalls: Shaped<PluginCall[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

@@ -96,6 +96,14 @@ everything below is on `main`. 1.0 will be released when the criteria in
   the step is over tells which: the model thought with no text sent, its
   thinking came back redacted, or it did not think; text the stream did not
   carry is taken from the transcript (`$.session.messages`).
+- **What other plugins do** through Claude Code, under each one in Plugins
+  in the loop: its model calls (model, prompt size), MCP calls, web requests
+  (method and URL, host and path only) and processes, with how each went
+  and how long it took; never headers, bodies, credentials or environments
+  (`model.complete`, `mcp.call`, `http.fetch`, `process.run`).
+- **What it does not show, and why**: a README section listing every event
+  left out (drawing, the prompt box, listings, the engine's lifecycle,
+  Anthropic's telemetry, mods loaded before Glass Box…) with the reason.
 - **Slash commands and settings** as rows of their own among the turns: the
   command as typed, who ran it, what it printed and the notes it left for
   the model to read (`command.run`); each `/config` change with its value

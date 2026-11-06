@@ -1007,3 +1007,4 @@ test('Stats shows what was sent to the operator’s telemetry collector, and say
     await ui.unmount()
   }
 })
+

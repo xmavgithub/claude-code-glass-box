@@ -81,7 +81,8 @@ beside the session's counts, a **Guide** button (`g`):
   the tools offered, loaded in full or behind ToolSearch; the agent types the
   model can start, and any a plugin kept from it; the plugins in the loop
   (mods with what they hook and call, other plugins by the tools, agent
-  types, skills and permission checks they provide); the skills loaded.
+  types, skills and permission checks they provide, and the calls they make
+  to a model, an MCP server, the network or a process); the skills loaded.
 - **Context**: how full the context window is and what fills it (system
   prompt, tools, memory files, MCP servers, messages, free space), as
   /context counts it; the session's cost and each recent turn's; the
@@ -154,6 +155,7 @@ not installed.
 
 | Event | What Glass Box records |
 | --- | --- |
+| `model.complete` / `mcp.call` / `http.fetch` / `process.run` | Other plugins' calls through Claude Code: the plugin, the model and prompt size, the MCP tool, the method and URL (host and path only), the command; how each went and how long it took. Never headers, bodies, credentials or environments |
 | `telemetry.log` (collector) | The records Claude Code sends to the OpenTelemetry collector your operator configured: event and attributes |
 | `command.run` / `config.set` | Slash commands that ran, with their output and notes for the model; `/config` changes, before and after, or why refused |
 | `agent.offer` | Each agent type offered to the model: its source and provider, when to use it, and whether a plugin kept it from the model |
@@ -195,6 +197,24 @@ not installed.
   does not otherwise say which model answered.
 - The mod API it builds on is in early access and may change between Claude
   Code releases.
+
+## What it does not show, and why
+
+Glass Box hooks the events of the agent loop that Claude Code opens to mods.
+What it leaves out, and why:
+
+| Left out | Why |
+| --- | --- |
+| Drawing: `ui.*` (render, press, input, scroll, focus…) | How panes are drawn, not what the agent does |
+| The prompt box: `prompt.fill`, `prompt.suggest`, `prompt.edit`, `prompt.change`, `prompt.autocomplete` | Typing before you send; what you send is shown (`prompt.submit`) |
+| `prompt.section`, `prompt.mention` | Covered: `prompt.compose` shows every section of the system prompt, `prompt.attachment` every mentioned file as the model reads it |
+| `command.describe`, `config.describe` | How commands and settings are listed; what ran and what changed is shown |
+| `engine.create`, `session.end`, `session.attach`, `session.detach` | The engine's and the surfaces' lifecycle; at the session's end there is no pane left to show it in |
+| `attribution.text` | The attribution line the model is asked to put in a commit or pull request: of little use to show |
+| `telemetry.log` to Anthropic, `telemetry.mark` | Open to the CLI's built-in plugins only: a mod's hook on them does not load. What goes to your operator's collector is shown |
+| Mods loaded before Glass Box, and their calls through `$` | The engine tells a mod only of the mods loaded after it, and only a hook above a caller sees its calls. They show by what they do in the open: tools, skills, agent types, permission checks |
+| Other plugins' long-running processes (`process.spawn`), files, storage, clock, environment, audio, `model.classify`, `model.fork` | Not shown yet; their model, MCP, network and short process calls are |
+| What happened before Glass Box loaded, and beyond its history | It keeps the last 30 turns, 300 tool calls and a capped history of the rest |
 
 ## Roadmap
 

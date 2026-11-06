@@ -11,6 +11,7 @@ import type {
   Injection,
   Letter,
   ModInfo,
+  PluginCall,
   OfferedAgent,
   OfferedTool,
   PromptSnapshot,
@@ -111,6 +112,9 @@ const MAX_TELEMETRY = 100
 const TELEMETRY_EVERY_MS = 2000
 let telemetryBuffer: TelemetryRow[] = []
 let telemetryAt = 0
+// What other plugins do through `$`: model, MCP, network and process calls.
+const pluginCalls = atom({ plugin: 'glass-box', key: 'pluginCalls' } as const, [], { shape: 'pluginCalls-1' })
+const MAX_PLUGIN_CALLS = 200
 // The slash commands that ran and the settings that changed.
 const actions = atom({ plugin: 'glass-box', key: 'actions' } as const, [], { shape: 'actions-1' })
 const MAX_ACTIONS = 100
@@ -530,6 +534,34 @@ function collect(value: unknown, key: string, out: string[] = [], depth = 0): st
     else collect(v, key, out, depth + 1)
   }
   return out
+}
+
+/**
+ * A URL with only its host and path: a query string or credentials in it can
+ * carry tokens, and Glass Box keeps no secrets.
+ */
+function safeUrl(url: string) {
+  const match = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^@/]*@)?([^/?#]*)([^?#]*)/i.exec(url)
+  return match === null ? url.split(/[?#]/)[0] ?? '' : `${match[1]}${match[2]}${match[3]}${/[?#]/.test(url) ? ' (query hidden)' : ''}`
+}
+
+/** Times a plugin's call through `$` and records how it went. */
+async function watch(
+  $: EngineInterface,
+  plugin: string,
+  op: PluginCall['op'],
+  summary: string,
+  run: () => Promise<{ outcome: string; isError: boolean }>,
+) {
+  const at = await now($)
+  let result: { outcome: string; isError: boolean } = { outcome: 'failed', isError: true }
+  try {
+    result = await run()
+  } finally {
+    const durationMs = Math.round((await now($)) - at)
+    const record: PluginCall = { id: `${at}-${injectionSeq++}`, at, plugin, op, summary: clip(summary, MAX_CHANGE), ...result, durationMs }
+    await quietly(() => update($, pluginCalls, list => [...list, record].slice(-MAX_PLUGIN_CALLS)))
+  }
 }
 
 /** Writes the buffered telemetry rows: their counts, and the latest ones. */
@@ -1225,6 +1257,62 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // What other plugins do through `$`. Only a hook above the caller sees its
+  // call, so these are the plugins that load after Glass Box.
+  on('model.complete', async ($, e, next) => {
+    let answer: Awaited<ReturnType<typeof next>> | undefined
+    await watch($, next.origin.plugin, 'model', `${shortModel(e.model)} · prompt ${e.prompt.length} chars · “${firstLine(e.prompt).slice(0, 80)}”`, async () => {
+      answer = await next(e)
+      return 'deny' in answer && answer.deny !== undefined
+        ? { outcome: `refused: ${answer.deny}`, isError: true }
+        : 'value' in answer && answer.value !== undefined
+          ? answer.value.isAnswered
+            ? { outcome: `answered, ${answer.value.text.length} chars`, isError: false }
+            : { outcome: `not answered: ${answer.value.reason}`, isError: true }
+          : { outcome: 'done', isError: false }
+    })
+    return answer as Awaited<ReturnType<typeof next>>
+  }).catch(($, e, next) => next(e))
+
+  on('mcp.call', async ($, e, next) => {
+    let answer: Awaited<ReturnType<typeof next>> | undefined
+    await watch($, next.origin.plugin, 'mcp', `${e.server} · ${e.tool}`, async () => {
+      answer = await next(e)
+      return 'deny' in answer && answer.deny !== undefined
+        ? { outcome: `refused: ${answer.deny}`, isError: true }
+        : 'value' in answer && answer.value !== undefined
+          ? { outcome: answer.value.isError ? 'the tool reported an error' : 'ok', isError: answer.value.isError }
+          : { outcome: 'done', isError: false }
+    })
+    return answer as Awaited<ReturnType<typeof next>>
+  }).catch(($, e, next) => next(e))
+
+  on('http.fetch', async ($, e, next) => {
+    let answer: Awaited<ReturnType<typeof next>> | undefined
+    await watch($, next.origin.plugin, 'http', `${e.init?.method ?? 'GET'} ${safeUrl(e.url)}`, async () => {
+      answer = await next(e)
+      return 'deny' in answer && answer.deny !== undefined
+        ? { outcome: `refused: ${answer.deny}`, isError: true }
+        : 'value' in answer && answer.value !== undefined
+          ? { outcome: `HTTP ${answer.value.status}`, isError: !answer.value.ok }
+          : { outcome: 'done', isError: false }
+    })
+    return answer as Awaited<ReturnType<typeof next>>
+  }).catch(($, e, next) => next(e))
+
+  on('process.run', async ($, e, next) => {
+    let answer: Awaited<ReturnType<typeof next>> | undefined
+    await watch($, next.origin.plugin, 'process', e.argv.join(' '), async () => {
+      answer = await next(e)
+      return 'deny' in answer && answer.deny !== undefined
+        ? { outcome: `refused: ${answer.deny}`, isError: true }
+        : 'value' in answer && answer.value !== undefined
+          ? { outcome: `exit ${answer.value.exitCode}`, isError: answer.value.exitCode !== 0 }
+          : { outcome: 'done', isError: false }
+    })
+    return answer as Awaited<ReturnType<typeof next>>
+  }).catch(($, e, next) => next(e))
+
   // A slash command, the way it was typed, and what it printed and left for
   // the model to read.
   on('command.run', async ($, e, next) => {
@@ -1384,7 +1472,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList, actionList, telemetryNow] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList, actionList, telemetryNow, pluginCallList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1400,6 +1488,7 @@ export const register: Register = on => {
         read($, agentTypes),
         read($, actions),
         read($, telemetry),
+        read($, pluginCalls),
       ])
 
     const columns = e.props.bodyColumns
@@ -2519,7 +2608,7 @@ export const register: Register = on => {
           {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
 
           {section('What Glass Box cannot see')}
-          {para('g-limits', 'The model’s private reasoning, how a server tool worked inside (only its input and result reach the transcript), and anything that happened before Glass Box loaded. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
+          {para('g-limits', 'The model’s reasoning beyond what it sends; how a server tool worked inside (only its input and result reach the transcript); Anthropic’s own telemetry, which only the CLI’s built-in plugins may watch; mods loaded before Glass Box, seen only by what they do; and anything before Glass Box loaded. The README lists every event it leaves out, and why. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
         </Box>
       )
     }
@@ -2732,11 +2821,19 @@ export const register: Register = on => {
 
     // --- Plugins in the loop: who besides Claude Code can act in the session.
 
+    /** A plugin call's kind, in the singular and the plural. */
+    const PLUGIN_OP: Record<PluginCall['op'], [string, string]> = {
+      model: ['model call', 'model calls'],
+      mcp: ['MCP call', 'MCP calls'],
+      http: ['web request', 'web requests'],
+      process: ['process', 'processes'],
+    }
+
     const renderPlugins = () => {
-      type Seen = { mod: ModInfo | null; tools: string[]; skills: Set<string>; agents: string[]; verdicts: number }
+      type Seen = { mod: ModInfo | null; tools: string[]; skills: Set<string>; agents: string[]; verdicts: number; calls: PluginCall[] }
       const seen = new Map<string, Seen>()
       const of = (name: string) => {
-        const entry = seen.get(name) ?? { mod: null, tools: [], skills: new Set<string>(), agents: [], verdicts: 0 }
+        const entry = seen.get(name) ?? { mod: null, tools: [], skills: new Set<string>(), agents: [], verdicts: 0, calls: [] }
         seen.set(name, entry)
         return entry
       }
@@ -2750,6 +2847,7 @@ export const register: Register = on => {
       for (const load of skillList) if (load.plugin !== null) of(load.plugin).skills.add(load.skill)
       for (const verdict of verdictList) if (verdict.plugin !== null) of(verdict.plugin).verdicts += 1
       for (const type of agentTypeList) if (type.provider !== 'engine') of(type.provider).agents.push(type.agent)
+      for (const call of pluginCallList) of(call.plugin).calls.push(call)
       const rows = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 
       return (
@@ -2757,12 +2855,12 @@ export const register: Register = on => {
           {section('Plugins in the loop')}
           {para(
             'n-plugins',
-            'Who besides Claude Code acts in this session. Mods (hooks modules) are listed with what they hook and call, as the engine scanned them; other plugins by what Glass Box saw them do: the tools and agent types they provide, the skills they load, the permission checks they decide.',
+            'Who besides Claude Code acts in this session. Mods (hooks modules) are listed with what they hook and call, as the engine scanned them; other plugins by what Glass Box saw them do: the tools and agent types they provide, the skills they load, the permission checks they decide, and the calls they make through Claude Code to a model, an MCP server, the network or a process (never their headers, bodies, credentials or environment).',
             true,
           )}
           {para(
             'n-plugins-limit',
-            'The engine tells a mod only of the mods loaded after it, and Glass Box may load late: a mod loaded before it shows here only by what it does. Context a plugin adds does not say which plugin added it.',
+            'The engine tells a mod only of the mods loaded after it, and only a mod above another in the chain sees its calls; Glass Box may load late, so a mod loaded before it shows here only by what it does in the open. Context a plugin adds does not say which plugin added it.',
             true,
           )}
           {rows.length === 0 && para('n-plugins-none', 'None seen yet.', true)}
@@ -2775,6 +2873,10 @@ export const register: Register = on => {
               p.skills.size > 0 ? plural(p.skills.size, 'skill', 'skills') : null,
               p.agents.length > 0 ? plural(p.agents.length, 'agent type', 'agent types') : null,
               p.verdicts > 0 ? plural(p.verdicts, 'permission check', 'permission checks') : null,
+              ...(['model', 'mcp', 'http', 'process'] as const).map(op => {
+                const n = p.calls.filter(c => c.op === op).length
+                return n > 0 ? plural(n, PLUGIN_OP[op][0], PLUGIN_OP[op][1]) : null
+              }),
             ].filter(part => part !== null)
 
             return toggleRow(
@@ -2803,6 +2905,17 @@ export const register: Register = on => {
                   {p.skills.size > 0 && para(`n-ps-${name}`, `Skills loaded: ${[...p.skills].join(', ')}.`, true)}
                   {p.agents.length > 0 && para(`n-pa-${name}`, `Agent types: ${p.agents.join(', ')}.`, true)}
                   {p.verdicts > 0 && para(`n-pv-${name}`, `Decided ${plural(p.verdicts, 'permission check', 'permission checks')} on tool calls.`, true)}
+                  {p.calls.length > 0 && para(`n-pc-${name}`, `Its latest calls through Claude Code (${p.calls.length} in all):`, true)}
+                  {[...p.calls].reverse().slice(0, 15).map(c => (
+                    <Box key={`n-pcl-${c.id}`} paddingLeft={4} {...fit(4)}>
+                      {seg(room(6), [
+                        { text: c.isError ? '✗' : '✓', color: c.isError ? 'error' : 'success' },
+                        { text: ` ${PLUGIN_OP[c.op][0]}`, bold: true },
+                        { text: `  ${formatDuration(c.durationMs)}  ${c.outcome}`, dim: true },
+                        { text: `  ${tidy(c.summary)}` },
+                      ])}
+                    </Box>
+                  ))}
                 </Box>
               ),
             )
@@ -3062,6 +3175,7 @@ export const register: Register = on => {
               await update($, mail, () => [])
               await update($, actions, () => [])
               await update($, telemetry, () => ({ counts: {}, recent: [] }))
+              await update($, pluginCalls, () => [])
               await update($, toggled, () => [])
             })
           }

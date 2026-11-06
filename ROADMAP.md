@@ -125,10 +125,10 @@ operations on `$`) against what Glass Box records. In order of value:
   kept in the pane only (`telemetry.log` on `collector`). Anthropic's own
   stream and feature marks are open to the CLI's built-in plugins only: a
   mod's hook on them does not load, so they are out of reach.
-- [ ] **What other plugins do.** Their model calls, MCP calls, network
+- [x] **What other plugins do.** Their model calls, MCP calls, network
   requests and processes, through `$` (`model.complete`, `mcp.call`,
   `http.fetch`, `process.run`).
-- [ ] **Out of reach, said.** The README lists what Glass Box leaves out and
+- [x] **Out of reach, said.** The README lists what Glass Box leaves out and
   why: drawing (`ui.*`), the prompt box (`prompt.fill`, `prompt.suggest`,
   `prompt.edit`, `prompt.change`, `prompt.autocomplete`), command and setting
   descriptions, the engine's lifecycle (`engine.create`, `session.end`,
