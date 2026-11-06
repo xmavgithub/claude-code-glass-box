@@ -385,6 +385,79 @@ test('text added to the context is listed under its turn, by who wrote it', asyn
   }
 })
 
+test('Instructions shows the system prompt, the first message’s blocks, the tools and the skills', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 1000) }))
+  on('prompt.compose', () => ({
+    sections: [
+      { id: 'intro', text: 'You are Claude Code.', scope: 'shared' },
+      { id: 'env', text: 'Working directory: /Users/me/proj', scope: 'session' },
+    ],
+  }))
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  on('skill.prompt', (_, e) => ({ text: `Instructions of ${e.skill}.` }))
+  on('tool.describe', (_, e) => ({ description: e.description, isDeferred: e.isDeferred }))
+  on('command.register', () => ({ value: { command: 'glass-box' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/Users/me/proj', surface: 'terminal', isInteractive: true })
+  await $.prompt.compose({
+    model: 'claude-opus-5-5',
+    promptModel: 'claude-opus-5-5',
+    surfaces: ['terminal'],
+    tools: ['Bash', 'Read', 'WebFetch'],
+    outputStyle: { name: 'default', isKeepingCodingInstructions: true },
+    traits: [],
+  } as never)
+  // The same prompt composed again on the next request is recorded once.
+  await $.prompt.compose({
+    model: 'claude-opus-5-5',
+    promptModel: 'claude-opus-5-5',
+    surfaces: ['terminal'],
+    tools: ['Bash', 'Read', 'WebFetch'],
+    outputStyle: { name: 'default', isKeepingCodingInstructions: true },
+    traits: [],
+  } as never)
+  await $.prompt.context({
+    blocks: [{ name: 'claudeMd', text: 'Always answer in Italian.' }, { name: 'currentDate', text: '2026-11-06' }],
+    instructionFiles: [
+      { path: '/Users/me/.claude/CLAUDE.md', kind: 'user', content: 'Always answer in Italian.' },
+      { path: '/Users/me/.claude/RTK.md', kind: 'user', content: 'rtk', parent: '/Users/me/.claude/CLAUDE.md' },
+    ],
+  } as never)
+  await $.tool.describe({ tool: 'Bash', description: 'Runs a shell command.', provider: { plugin: 'engine', tier: 'core' } } as never)
+  await $.tool.describe({ tool: 'WebFetch', description: 'Fetches a URL.', isDeferred: true, provider: { plugin: 'engine', tier: 'core' } } as never)
+  await $.tool.describe({ tool: 'mcp__ctx__search', description: 'Searches.', isDeferred: true, provider: { plugin: 'engine', tier: 'core' } } as never)
+  await $.skill.prompt({ skill: 'commit', source: 'built-in', text: 'raw', frontmatter: {} } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'v:instructions' })
+    const all = await texts(ui)
+
+    expect(has(all, /^opus-5-5 · 2 sections · 53 chars \(~13 tokens\) · 20 shared, 33 yours · 3 tools offered · updated/)).toBe(true)
+    expect(has(all, /^intro · shared · 20 chars$/)).toBe(true)
+    expect(has(all, /^claudeMd · 25 chars/)).toBe(true)
+    expect(has(all, /^user *  3 chars · ~\/\.claude\/RTK\.md · imported by CLAUDE\.md$/)).toBe(true)
+    expect(has(all, /^3 tools · 1 loaded \(21 chars \(~5 tokens\)\) · 2 behind ToolSearch$/)).toBe(true)
+    expect(has(all, /^commit · built-in · 23 chars/)).toBe(true)
+
+    await ui.press({ key: 'n:s:claude-opus-5-5|:intro' })
+    expect(await texts(ui)).toContain('You are Claude Code.')
+    await ui.press({ key: 'n:s:claude-opus-5-5|:intro' })
+
+    await ui.press({ key: 'n:tools' })
+    const toolsOpen = await texts(ui)
+    expect(toolsOpen).toContain('loaded: Bash 21')
+    expect(toolsOpen).toContain('behind ToolSearch: WebFetch')
+    expect(toolsOpen).toContain('behind ToolSearch: search')
+    await ui.press({ key: 'n:tools' })
+    await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})
+
 test('Clear empties the timeline', async ($, on) => {
   on('tool.call', () => ({ result: {}, text: 'ok' }))
   await $.tool.call({ tool: 'Read', file_path: '/a', tool_use_id: 'toolu_x' })

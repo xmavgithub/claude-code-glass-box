@@ -4,8 +4,12 @@ import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 import type {
   CallStatus,
   Change,
+  ContextSnapshot,
   Injection,
+  OfferedTool,
+  PromptSnapshot,
   Rewrite,
+  SkillLoad,
   ServerTool,
   Step,
   ToolCall,
@@ -30,6 +34,11 @@ const MAX_OUTPUT = 1500
 const MAX_INJECTIONS = 200
 const MAX_INJECTION_TEXT = 4000
 const MAX_CHANGE = 400
+const MAX_PROMPTS = 5
+const MAX_SECTION_TEXT = 3000
+const MAX_SKILLS = 50
+const MAX_SKILL_TEXT = 3000
+const MAX_TOOLS = 400
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
@@ -50,13 +59,27 @@ const injections = atom({ plugin: 'glass-box', key: 'injections' } as const, [],
   shape: 'injections-1',
 })
 
-// Gives each injection an id of its own, with the time it was recorded.
+const prompts = atom({ plugin: 'glass-box', key: 'prompts' } as const, [], { shape: 'prompts-1' })
+const contextSnapshot = atom({ plugin: 'glass-box', key: 'context' } as const, null, {
+  shape: 'context-1',
+})
+const skills = atom({ plugin: 'glass-box', key: 'skills' } as const, [], { shape: 'skills-1' })
+const tools = atom({ plugin: 'glass-box', key: 'tools' } as const, [], { shape: 'tools-1' })
+
+// Gives each injection and skill load an id of its own, with its time.
 let injectionSeq = 0
+
+// What was last written, so events raised on every request (the system
+// prompt, the tool list) only touch the state when something changed.
+const composeSeen = new Map<string, string>()
+let contextSeen = ''
+const toolSeen = new Map<string, string>()
 
 const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
   { id: 'stats', label: 'Stats', hotkey: '2' },
-  { id: 'guide', label: 'How it works', hotkey: '3' },
+  { id: 'instructions', label: 'Instructions', hotkey: '3' },
+  { id: 'guide', label: 'How it works', hotkey: '4' },
 ]
 
 // The session's working directory, to show paths relative to it, and the
@@ -566,6 +589,103 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // --- What the model is told: system prompt, context blocks, skills, tools.
+
+  // The system prompt as it goes out: every section, in order.
+  on('prompt.compose', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const key = `${e.promptModel}|${[...e.traits].sort().join(',')}`
+      const sections = answer.sections.map(s => ({
+        id: s.id,
+        scope: s.scope,
+        chars: s.text.length,
+        text: clip(s.text, MAX_SECTION_TEXT),
+      }))
+      const signature = `${e.tools.length}|${e.outputStyle?.name ?? "default"}|${sections.map(s => `${s.id}:${s.chars}`).join('|')}`
+      if (composeSeen.get(key) === signature) return
+      composeSeen.set(key, signature)
+      const snapshot: PromptSnapshot = {
+        key,
+        at: await now($),
+        model: e.model,
+        promptModel: e.promptModel,
+        outputStyle: e.outputStyle?.name ?? "default",
+        traits: [...e.traits],
+        toolCount: e.tools.length,
+        sections,
+      }
+      await update($, prompts, list => [...list.filter(p => p.key !== key), snapshot].slice(-MAX_PROMPTS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // The blocks in front of the conversation's first message, and the
+  // instruction files (CLAUDE.md and their imports) behind `claudeMd`.
+  on('prompt.context', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const files = answer.instructionFiles ?? e.instructionFiles ?? []
+      const snapshot: ContextSnapshot = {
+        at: await now($),
+        blocks: answer.blocks.map(b => ({ name: b.name, chars: b.text.length, text: clip(b.text, MAX_SECTION_TEXT) })),
+        files: files.map(f => ({ path: f.path, kind: f.kind, chars: f.content.length, parent: f.parent ?? null })),
+      }
+      const signature = JSON.stringify([
+        snapshot.blocks.map(b => [b.name, b.chars]),
+        snapshot.files.map(f => [f.path, f.chars]),
+      ])
+      if (signature === contextSeen) return
+      contextSeen = signature
+      await update($, contextSnapshot, () => snapshot)
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // A skill's instructions, as they join the conversation.
+  on('skill.prompt', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const at = await now($)
+      const turn = [...(await read($, turns))].reverse().find(t => t.agentId === null)
+      const record: SkillLoad = {
+        id: `${at}-${injectionSeq++}`,
+        skill: e.skill,
+        source: e.source,
+        plugin: e.pluginName ?? null,
+        path: e.path ?? null,
+        at,
+        turnId: turn?.id ?? null,
+        chars: answer.text.length,
+        text: clip(answer.text, MAX_SKILL_TEXT),
+      }
+      await update($, skills, list => [...list, record].slice(-MAX_SKILLS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // Each tool offered to the model, and whether it waits behind ToolSearch.
+  on('tool.describe', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      const record: OfferedTool = {
+        tool: e.tool,
+        provider: e.provider.plugin,
+        deferred: answer.isDeferred ?? e.isDeferred === true,
+        chars: answer.description.length,
+      }
+      const signature = `${record.provider}|${record.deferred}|${record.chars}`
+      if (toolSeen.get(record.tool) === signature) return
+      toolSeen.set(record.tool, signature)
+      await update($, tools, list => [...list.filter(t => t.tool !== record.tool), record].slice(-MAX_TOOLS))
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // The permission verdict: which rule, hook, setting or plugin decided.
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
@@ -652,6 +772,12 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
+    const [promptList, contextNow, skillList, toolList] = await Promise.all([
+      read($, prompts),
+      read($, contextSnapshot),
+      read($, skills),
+      read($, tools),
+    ])
 
     const columns = e.props.bodyColumns
     /** The width a line indented by `indent` cells may take, on the terminal. */
@@ -1216,12 +1342,185 @@ export const register: Register = on => {
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
           {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task. It has its own turns, steps and tool calls, shown as Subagent turns.')}
           {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
+          {term('g-w13', 'System prompt.', 'The standing instructions sent before the conversation on every request: how Claude Code works, your environment, your tools. The Instructions tab shows it section by section.')}
+          {term('g-w14', 'Instruction files.', 'Your CLAUDE.md files (and the files they import with @). They reach the model in front of the conversation’s first message.')}
+          {term('g-w15', 'Skill.', 'A packaged set of instructions Claude loads only when a task needs it, so it costs context only then.')}
+          {term('g-w16', 'ToolSearch.', 'How Claude Code keeps many tools available without sending all their descriptions: the model sees their names, and loads a tool’s full description when it needs it.')}
           {term('g-w11', 'Added context.', 'Text the model reads besides your message: Claude Code’s reminders (a to-do list, a mode change), listings (skills, tools), files you mentioned, and what hooks and plugins add. It counts against the context like anything else.')}
           {term('g-w12', 'Rewritten call.', 'A call whose arguments a PreToolUse hook changed after the model asked for it: the tool ran with the hook’s version, not the model’s.')}
           {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
 
           {section('What Glass Box cannot see')}
           {para('g-limits', 'The model’s private reasoning, how a server tool worked inside (only its input and result reach the transcript), and anything that happened before Glass Box loaded. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
+        </Box>
+      )
+    }
+
+    // --- Instructions: what the model is told before it reads the conversation.
+
+    const basename = (path: string) => path.split('/').pop() ?? path
+
+    /** A row with its own toggle; `body` shows under it while open. */
+    const toggleRow = (key: string, indent: number, head: JSX.Element, body: () => JSX.Element | null, byDefault = false) => {
+      const open = isOpen(key, byDefault)
+
+      return (
+        <Box key={`row-${key}`} flexDirection="column" paddingLeft={indent}>
+          <Box flexDirection="row" gap={1}>
+            <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
+            <Box {...fit(indent + 2)}>{head}</Box>
+          </Box>
+          {open && body()}
+        </Box>
+      )
+    }
+
+    const textBlock = (key: string, text: string, indent: number) => (
+      <Box key={key} paddingLeft={2} marginBottom={1} {...fit(indent + 2)}>
+        <Text wrap="wrap" dimColor>
+          {tidy(text)}
+        </Text>
+      </Box>
+    )
+
+    const renderInstructions = () => {
+      const latestFirst = [...promptList].sort((a, b) => b.at - a.at)
+      const loaded = toolList.filter(t => !t.deferred)
+      const deferred = toolList.filter(t => t.deferred)
+      const byProvider = new Map<string, OfferedTool[]>()
+      for (const tool of toolList) {
+        const provider = toolName(tool.tool).server ?? tool.provider
+        const list = byProvider.get(provider) ?? []
+        list.push(tool)
+        byProvider.set(provider, list)
+      }
+
+      return (
+        <Box flexDirection="column">
+          {section('System prompt')}
+          {para('n-sp', 'The standing instructions Claude Code sends with every request, before the conversation. Shared sections read the same for everyone and are cached across users; session sections are built for you: your environment, your settings, your tools.', true)}
+          {latestFirst.length === 0 && para('n-sp-none', 'Not recorded yet: it is composed when Claude Code next calls the model.', true)}
+          {latestFirst.map((snap, i) => {
+            const total = snap.sections.reduce((n, s) => n + s.chars, 0)
+            const shared = snap.sections.filter(s => s.scope === 'shared').reduce((n, s) => n + s.chars, 0)
+            const extras = [
+              `${snap.toolCount} tools offered`,
+              snap.outputStyle !== 'default' ? `output style ${snap.outputStyle}` : null,
+              snap.traits.length > 0 ? snap.traits.join(', ') : null,
+              `updated ${formatTime(snap.at)}`,
+            ].filter(part => part !== null)
+
+            return toggleRow(
+              `n:p:${snap.key}`,
+              0,
+              <Text wrap="truncate-end">
+                <Text bold>{shortModel(snap.promptModel)}</Text>
+                <Text dimColor>{` · ${plural(snap.sections.length, 'section', 'sections')} · ${formatChars(total)} · ${formatTokens(shared)} shared, ${formatTokens(total - shared)} yours · ${extras.join(' · ')}`}</Text>
+              </Text>,
+              () => (
+                <Box flexDirection="column">
+                  {snap.sections.map(sec =>
+                    toggleRow(
+                      `n:s:${snap.key}:${sec.id}`,
+                      2,
+                      <Text wrap="truncate-end">
+                        <Text>{sec.id}</Text>
+                        <Text dimColor>{` · ${sec.scope === 'shared' ? 'shared' : 'yours'} · ${formatTokens(sec.chars)} chars`}</Text>
+                      </Text>,
+                      () => textBlock(`n:st:${snap.key}:${sec.id}`, sec.text, 4),
+                    ),
+                  )}
+                </Box>
+              ),
+              i === 0,
+            )
+          })}
+
+          {section('In front of the first message')}
+          {para('n-cb', 'Context blocks Claude Code puts in front of the conversation’s first message: your instruction files (CLAUDE.md and what they import), today’s date, and similar facts.', true)}
+          {contextNow === null && para('n-cb-none', 'Not recorded yet: these are sent with the first message of a conversation.', true)}
+          {contextNow !== null &&
+            contextNow.blocks.map(block =>
+              toggleRow(
+                `n:b:${block.name}`,
+                0,
+                <Text wrap="truncate-end">
+                  <Text>{block.name}</Text>
+                  <Text dimColor>{` · ${formatChars(block.chars)}`}</Text>
+                </Text>,
+                () => textBlock(`n:bt:${block.name}`, block.text, 2),
+              ),
+            )}
+          {contextNow !== null && contextNow.files.length > 0 && (
+            <Box key="n-files" flexDirection="column" marginTop={1}>
+              {para('n-files-head', `Instruction files behind claudeMd (${contextNow.files.length}):`)}
+              {contextNow.files.map(file =>
+                line(
+                  `n-file-${file.path}`,
+                  file.kind,
+                  `${formatTokens(file.chars)} chars · ${tidy(file.path)}${file.parent !== null ? ` · imported by ${basename(file.parent)}` : ''}`,
+                  8,
+                ),
+              )}
+            </Box>
+          )}
+
+          {section('Tools offered')}
+          {para('n-tools', 'Every tool the model can call. A loaded tool sends its full description with every request; a tool behind ToolSearch costs only its name until the model asks for it.', true)}
+          {toolList.length === 0 && para('n-tools-none', 'Not recorded yet: tools are listed when Claude Code next calls the model.', true)}
+          {toolList.length > 0 &&
+            toggleRow(
+              'n:tools',
+              0,
+              <Text wrap="truncate-end">
+                <Text>{plural(toolList.length, 'tool', 'tools')}</Text>
+                <Text dimColor>{` · ${loaded.length} loaded (${formatChars(loaded.reduce((n, t) => n + t.chars, 0))}) · ${deferred.length} behind ToolSearch`}</Text>
+              </Text>,
+              () => (
+                <Box flexDirection="column" paddingLeft={2}>
+                  {[...byProvider.entries()]
+                    .sort((a, b) => b[1].length - a[1].length)
+                    .map(([provider, list]) => {
+                      const shown = list.filter(t => !t.deferred).map(t => `${toolName(t.tool).name} ${formatTokens(t.chars)}`)
+                      const hidden = list.filter(t => t.deferred).map(t => toolName(t.tool).name)
+                      return (
+                        <Box key={`n-prov-${provider}`} flexDirection="column" marginTop={1} {...fit(4)}>
+                          <Text wrap="truncate-end">
+                            <Text bold>{provider === 'engine' ? 'Claude Code' : provider}</Text>
+                            <Text dimColor>{` · ${plural(list.length, 'tool', 'tools')}`}</Text>
+                          </Text>
+                          {shown.length > 0 && <Text wrap="wrap">{`loaded: ${shown.join(', ')}`}</Text>}
+                          {hidden.length > 0 && (
+                            <Text wrap="wrap" dimColor>
+                              {`behind ToolSearch: ${hidden.join(', ')}`}
+                            </Text>
+                          )}
+                        </Box>
+                      )
+                    })}
+                </Box>
+              ),
+            )}
+
+          {section('Skills loaded')}
+          {para('n-skills', 'A skill is a packaged set of instructions Claude loads when a task needs it; its text then joins the conversation.', true)}
+          {skillList.length === 0 && para('n-skills-none', 'None loaded in this session yet.', true)}
+          {[...skillList].reverse().map(load =>
+            toggleRow(
+              `n:k:${load.id}`,
+              0,
+              <Text wrap="truncate-end">
+                <Text bold>{load.skill}</Text>
+                <Text dimColor>{` · ${load.source}${load.plugin !== null ? ` (${load.plugin})` : ''} · ${formatChars(load.chars)} · ${formatTime(load.at)}`}</Text>
+              </Text>,
+              () => (
+                <Box flexDirection="column">
+                  {load.path !== null && para(`n-kp-${load.id}`, tidy(load.path), true)}
+                  {textBlock(`n-kt-${load.id}`, load.text, 2)}
+                </Box>
+              ),
+            ),
+          )}
         </Box>
       )
     }
@@ -1253,6 +1552,7 @@ export const register: Register = on => {
               await update($, verdicts, () => [])
               await update($, rewrites, () => [])
               await update($, injections, () => [])
+              await update($, skills, () => [])
               await update($, toggled, () => [])
             })
           }
@@ -1273,7 +1573,13 @@ export const register: Register = on => {
             ].join(' · ')}
           </Text>
         </Box>
-        {current === 'stats' ? renderStats() : current === 'guide' ? renderGuide() : renderTimeline()}
+        {current === 'stats'
+          ? renderStats()
+          : current === 'instructions'
+            ? renderInstructions()
+            : current === 'guide'
+              ? renderGuide()
+              : renderTimeline()}
       </Box>
     )
 
@@ -1285,7 +1591,7 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">
               Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
             </Text>
-            <Text dimColor wrap="wrap">New to this? Open How it works (press 3 while the pane has the keyboard).</Text>
+            <Text dimColor wrap="wrap">New to this? Open How it works (press 4 while the pane has the keyboard).</Text>
           </Box>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}

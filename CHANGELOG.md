@@ -6,6 +6,25 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Instructions** tab (hotkey `3`; How it works moves to `4`): what the model
+  is told before it reads the conversation.
+  - The **system prompt**, section by section, with each section's size, text,
+    and whether it is shared (the same for everyone, cached across users) or
+    yours; one entry per kind of prompt (main loop, subagents), with model,
+    output style and tool count (`prompt.compose`).
+  - What goes **in front of the first message**: the context blocks
+    (`claudeMd`, the date…) and the instruction files behind `claudeMd`,
+    with their kind and which file imported them (`prompt.context`).
+  - The **tools offered**: how many are loaded in full, the size of their
+    descriptions, and which wait behind ToolSearch, by provider
+    (`tool.describe`).
+  - The **skills loaded** in the session, with source, size and text
+    (`skill.prompt`).
+- Glossary entries for system prompt, instruction files, skill and
+  ToolSearch.
+
 ## [0.4.0] - 2026-11-06
 
 ### Added

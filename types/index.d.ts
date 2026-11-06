@@ -1,5 +1,74 @@
 /** The pane's tabs. */
-export type View = 'timeline' | 'stats' | 'guide'
+export type View = 'timeline' | 'stats' | 'instructions' | 'guide'
+
+/** One section of the system prompt, as it was sent. */
+export type PromptPart = {
+  id: string
+  /** `shared`: the same for everyone, cached across users; `session`: yours. */
+  scope: string
+  chars: number
+  /** Its text, clipped. */
+  text: string
+}
+
+/** The system prompt as last composed for one model and kind of loop. */
+export type PromptSnapshot = {
+  /** promptModel and traits: one snapshot per kind of prompt. */
+  key: string
+  at: number
+  model: string
+  promptModel: string
+  outputStyle: string
+  traits: string[]
+  toolCount: number
+  sections: PromptPart[]
+}
+
+/** A block put in front of the conversation's first message (claudeMd, the date…). */
+export type ContextBlock = { name: string; chars: number; text: string }
+
+/** An instruction file behind the claudeMd block. */
+export type InstructionFileInfo = {
+  path: string
+  /** managed, user, project, local or memory. */
+  kind: string
+  chars: number
+  /** The file whose `@` import brought this one in. */
+  parent: string | null
+}
+
+/** The context blocks and instruction files, as last sent. */
+export type ContextSnapshot = {
+  at: number
+  blocks: ContextBlock[]
+  files: InstructionFileInfo[]
+}
+
+/** A skill whose instructions were loaded into the conversation. */
+export type SkillLoad = {
+  id: string
+  skill: string
+  /** Whose words: userSettings, projectSettings, plugin, built-in, mcp… */
+  source: string
+  plugin: string | null
+  path: string | null
+  at: number
+  turnId: string | null
+  chars: number
+  /** Its text, clipped. */
+  text: string
+}
+
+/** A tool offered to the model. */
+export type OfferedTool = {
+  tool: string
+  /** The plugin that provides it, `engine` for Claude Code's own. */
+  provider: string
+  /** True when the model sees only its name, behind ToolSearch. */
+  deferred: boolean
+  /** The length of its description, the part that costs context. */
+  chars: number
+}
 
 /** The state of a timeline item: a turn, a step or a tool call. */
 export type CallStatus = 'running' | 'ok' | 'error' | 'denied'
@@ -148,6 +217,10 @@ declare module 'claude-code' {
       verdicts: Shaped<Verdict[]>
       rewrites: Shaped<Rewrite[]>
       injections: Shaped<Injection[]>
+      prompts: Shaped<PromptSnapshot[]>
+      context: Shaped<ContextSnapshot | null>
+      skills: Shaped<SkillLoad[]>
+      tools: Shaped<OfferedTool[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

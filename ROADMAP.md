@@ -60,12 +60,12 @@ Code events they build on.
 
 > "Which instructions and tools did the model have?"
 
-- [ ] **Active instructions.** The sections of the system prompt (CLAUDE.md
+- [x] **Active instructions.** The sections of the system prompt (CLAUDE.md
   files, memory, the skills listing, output style…) with their size, from
   `prompt.compose`.
-- [ ] **Skills.** Each skill loaded in the session, when and why, from
+- [x] **Skills.** Each skill loaded in the session, when and why, from
   `skill.prompt`.
-- [ ] **Tools on offer.** Which tools the model sees in full and which wait
+- [x] **Tools on offer.** Which tools the model sees in full and which wait
   behind ToolSearch, from `tool.describe`.
 
 ### 0.6: Resources
