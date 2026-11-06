@@ -35,8 +35,9 @@ the loop itself and what changes it (turns, steps, server tools such as the
 advisor, tool calls and their permission verdicts, calls a hook rewrote,
 everything added to the model's context), and what the model is told (the
 system prompt, the first message's context blocks and CLAUDE.md files, the
-tools offered, the skills loaded). Four tabs: Timeline, Stats, Instructions,
-How it works.
+tools offered, the skills loaded), and the resources (the context window and
+what fills it, cost per session and per turn, rate limits, compactions). Five
+tabs: Timeline, Stats, Instructions, Context, How it works.
 
 ## Next
 
@@ -74,9 +75,9 @@ Code events they build on.
 
 > "How full is the context, and what does the session cost?"
 
-- [ ] **Context tab.** Context window usage, session cost and rate-limit
+- [x] **Context tab.** Context window usage, session cost and rate-limit
   windows, live, from `session.measure`.
-- [ ] **Compactions.** Each compaction as a timeline row: what triggered it,
+- [x] **Compactions.** Each compaction as a timeline row: what triggered it,
   how much context it freed (`session.compact`).
 
 ### Agents

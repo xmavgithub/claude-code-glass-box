@@ -2,12 +2,15 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
 import type {
+  Breakdown,
   CallStatus,
   Change,
+  Compaction,
   ContextSnapshot,
   Injection,
   OfferedTool,
   PromptSnapshot,
+  Resources,
   Rewrite,
   SkillLoad,
   ServerTool,
@@ -42,7 +45,7 @@ const MAX_TOOLS = 400
 
 // Bump a shape tag whenever that record's fields change: the engine then
 // declines what an earlier version stored, which outlives a reload.
-const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-1' })
+const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 'turns-2' })
 const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-2' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
@@ -65,6 +68,22 @@ const contextSnapshot = atom({ plugin: 'glass-box', key: 'context' } as const, n
 })
 const skills = atom({ plugin: 'glass-box', key: 'skills' } as const, [], { shape: 'skills-1' })
 const tools = atom({ plugin: 'glass-box', key: 'tools' } as const, [], { shape: 'tools-1' })
+const resources = atom({ plugin: 'glass-box', key: 'resources' } as const, null, {
+  shape: 'resources-1',
+})
+const breakdown = atom({ plugin: 'glass-box', key: 'breakdown' } as const, null, {
+  shape: 'breakdown-1',
+})
+const compactions = atom({ plugin: 'glass-box', key: 'compactions' } as const, [], {
+  shape: 'compactions-1',
+})
+
+const MAX_COMPACTIONS = 50
+// The /context-style breakdown is estimated locally: at most this often.
+const BREAKDOWN_EVERY_MS = 30_000
+let lastBreakdownAt = 0
+// The session's cost when each turn started, to tell what the turn cost.
+const costAtStart = new Map<string, number>()
 
 // Gives each injection and skill load an id of its own, with its time.
 let injectionSeq = 0
@@ -79,7 +98,8 @@ const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
   { id: 'stats', label: 'Stats', hotkey: '2' },
   { id: 'instructions', label: 'Instructions', hotkey: '3' },
-  { id: 'guide', label: 'How it works', hotkey: '4' },
+  { id: 'context', label: 'Context', hotkey: '4' },
+  { id: 'guide', label: 'How it works', hotkey: '5' },
 ]
 
 // The session's working directory, to show paths relative to it, and the
@@ -157,6 +177,8 @@ const formatDuration = (ms: number | null) =>
 const formatTime = (at: number) => new Date(at).toTimeString().slice(0, 8)
 
 const shortModel = (model: string) => model.replace(/^claude-/, '')
+
+const formatUsd = (usd: number) => (usd < 0.01 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`)
 
 // Keys of a tool.call that are not the tool's own arguments.
 const RESERVED = new Set(['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent'])
@@ -330,6 +352,61 @@ async function patchStep($: EngineInterface, key: string, patch: (step: Step) =>
   await update($, steps, list => list.map(step => (step.key === key ? patch(step) : step)))
 }
 
+type Measured = {
+  context: { tokens?: number; window: number; percent?: number }
+  rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]
+  cost?: { usd: number }
+}
+
+function resourcesOf(m: Measured, at: number): Resources {
+  return {
+    at,
+    contextTokens: m.context.tokens ?? null,
+    window: m.context.window,
+    percent: m.context.percent ?? null,
+    costUsd: m.cost?.usd ?? null,
+    rateLimits: m.rateLimits.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt ?? null })),
+  }
+}
+
+/** The context window by category, as /context counts it (estimated locally). */
+async function refreshBreakdown($: EngineInterface): Promise<void> {
+  lastBreakdownAt = Date.now()
+  const usage = await $.session.usage({ breakdown: 'summary' })
+  const at = await now($)
+  await update($, resources, () => resourcesOf(usage, at))
+  const b = usage.context.breakdown
+  if (b === undefined) return
+
+  const servers = new Map<string, { server: string; tools: number; loaded: number; tokens: number }>()
+  for (const tool of b.mcpTools) {
+    const row = servers.get(tool.serverName) ?? { server: tool.serverName, tools: 0, loaded: 0, tokens: 0 }
+    row.tools += 1
+    row.loaded += tool.isLoaded ? 1 : 0
+    row.tokens += tool.tokens
+    servers.set(tool.serverName, row)
+  }
+  const record: Breakdown = {
+    at,
+    model: b.model,
+    totalTokens: b.totalTokens,
+    maxTokens: b.maxTokens,
+    percentage: b.percentage,
+    isAutoCompactEnabled: b.isAutoCompactEnabled,
+    autoCompactThreshold: b.autoCompactThreshold ?? null,
+    categories: b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
+    memoryFiles: b.memoryFiles.map(f => ({ path: f.path, type: f.type, tokens: f.tokens })),
+    mcpServers: [...servers.values()].sort((x, y) => y.tokens - x.tokens),
+    agents: { count: b.agents.length, tokens: b.agents.reduce((n, a) => n + a.tokens, 0) },
+    skills: b.skills === undefined ? null : { total: b.skills.totalSkills, included: b.skills.includedSkills, tokens: b.skills.tokens },
+    slashCommands:
+      b.slashCommands === undefined
+        ? null
+        : { total: b.slashCommands.totalCommands, included: b.slashCommands.includedCommands, tokens: b.slashCommands.tokens },
+  }
+  await update($, breakdown, () => record)
+}
+
 /** Every string under a key named `key`, depth first, in a block of unknown shape. */
 function collect(value: unknown, key: string, out: string[] = [], depth = 0): string[] {
   if (depth > 6 || value === null || typeof value !== 'object') return out
@@ -429,6 +506,7 @@ export const register: Register = on => {
         durationMs: null,
         outcome: null,
         usage: null,
+        costUsd: null,
       }
       const kept = [...before.filter(t => t.id !== turn.id), turn].slice(-MAX_TURNS)
       const keptIds = new Set(kept.map(t => t.id))
@@ -439,7 +517,13 @@ export const register: Register = on => {
         await update($, injections, list =>
           list.filter(item => item.turnId === null || !dropped.has(item.turnId)),
         )
+        for (const id of dropped) costAtStart.delete(id)
       }
+    })
+    // The session's cost now, to tell at the turn's end what it cost.
+    await quietly(async () => {
+      const usd = (await $.session.usage()).cost?.usd
+      if (usd !== undefined) costAtStart.set(e.turnId, usd)
     })
 
     return next(e)
@@ -447,11 +531,18 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     await quietly(() => fillServerResults($, e.agentId ?? null))
+    let costUsd: number | null = null
+    await quietly(async () => {
+      const start = costAtStart.get(e.turnId)
+      const usd = (await $.session.usage()).cost?.usd
+      if (start !== undefined && usd !== undefined) costUsd = Math.max(0, usd - start)
+      costAtStart.delete(e.turnId)
+    })
     await quietly(() =>
       update($, turns, list =>
         list.map(turn =>
           turn.id === e.turnId
-            ? { ...turn, durationMs: e.durationMs, outcome: e.reason, usage: usageOf(e.usage) }
+            ? { ...turn, durationMs: e.durationMs, outcome: e.reason, usage: usageOf(e.usage), costUsd }
             : turn,
         ),
       ),
@@ -585,6 +676,50 @@ export const register: Register = on => {
           : [...list, record].slice(-MAX_INJECTIONS),
       )
     })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // --- Resources: the context window, cost and rate limits, compactions.
+
+  // Raised when the status line's figures change: context, rate limits, cost.
+  on('session.measure', async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      await update($, resources, () => resourcesOf(e, Date.now()))
+      if (e.changed.includes('context') && Date.now() - lastBreakdownAt > BREAKDOWN_EVERY_MS) {
+        await refreshBreakdown($)
+      }
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
+  // A compaction: the conversation summarized to free the context window.
+  on('session.compact', async ($, e, next) => {
+    const startedAt = await now($)
+    const answer = await next(e)
+    // `precompute` prepares a summary in the background; only real ones count.
+    if (e.trigger !== 'precompute') {
+      await quietly(async () => {
+        const agentId = e.agentId ?? null
+        const turn = [...(await read($, turns))].reverse().find(t => t.agentId === agentId)
+        const record: Compaction = {
+          id: `${startedAt}-${injectionSeq++}`,
+          at: startedAt,
+          turnId: turn?.id ?? null,
+          agentId,
+          trigger: e.trigger,
+          instructions: e.instructions ?? null,
+          tokensBefore: answer.skip === undefined ? answer.tokensBefore ?? null : null,
+          tokensAfter: answer.skip === undefined ? answer.tokensAfter ?? null : null,
+          durationMs: Math.round((await now($)) - startedAt),
+          skipped: answer.skip ?? null,
+        }
+        await update($, compactions, list => [...list, record].slice(-MAX_COMPACTIONS))
+        if (record.skipped === null) lastBreakdownAt = 0 // the breakdown changed: refresh it
+      })
+    }
 
     return answer
   }).catch(($, e, next) => next(e))
@@ -772,12 +907,16 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList] = await Promise.all([
-      read($, prompts),
-      read($, contextSnapshot),
-      read($, skills),
-      read($, tools),
-    ])
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList] =
+      await Promise.all([
+        read($, prompts),
+        read($, contextSnapshot),
+        read($, skills),
+        read($, tools),
+        read($, resources),
+        read($, breakdown),
+        read($, compactions),
+      ])
 
     const columns = e.props.bodyColumns
     /** The width a line indented by `indent` cells may take, on the terminal. */
@@ -844,6 +983,12 @@ export const register: Register = on => {
     }
     const linked = new Set(stepList.flatMap(s => s.toolIds))
     const rewriteById = new Map(rewriteList.map(r => [r.id, r]))
+    const compactionsByTurn = new Map<string | null, Compaction[]>()
+    for (const c of compactionList) {
+      const list = compactionsByTurn.get(c.turnId) ?? []
+      list.push(c)
+      compactionsByTurn.set(c.turnId, list)
+    }
     const injectionsByTurn = new Map<string | null, Injection[]>()
     for (const item of injectionList) {
       const list = injectionsByTurn.get(item.turnId) ?? []
@@ -864,6 +1009,7 @@ export const register: Register = on => {
         durationMs: null,
         outcome: null,
         usage: null,
+        costUsd: null,
       })
     }
     allTurns.sort((a, b) => b.startedAt - a.startedAt)
@@ -1085,6 +1231,7 @@ export const register: Register = on => {
         plural(toolCount, 'tool call', 'tool calls'),
         lastUsage !== null ? `context ${formatTokens(contextTokens(lastUsage))}` : null,
         outcome === undefined ? 'running' : formatDuration(turn.durationMs),
+        turn.costUsd !== null ? formatUsd(turn.costUsd) : null,
         outcome?.label ?? null,
       ]
         .filter(part => part !== null)
@@ -1112,6 +1259,7 @@ export const register: Register = on => {
             </Text>
           </Box>
           {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
+          {open && (compactionsByTurn.get(turn.id) ?? []).map(c => compactionLine(c, 2))}
           {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
         </Box>
       )
@@ -1395,12 +1543,162 @@ export const register: Register = on => {
           {term('g-w14', 'Instruction files.', 'Your CLAUDE.md files (and the files they import with @). They reach the model in front of the conversation’s first message.')}
           {term('g-w15', 'Skill.', 'A packaged set of instructions Claude loads only when a task needs it, so it costs context only then.')}
           {term('g-w16', 'ToolSearch.', 'How Claude Code keeps many tools available without sending all their descriptions: the model sees their names, and loads a tool’s full description when it needs it.')}
+          {term('g-w17', 'Compaction.', 'When the context is nearly full, Claude Code replaces the conversation so far with a summary and goes on from it. Details from before the summary are no longer in front of the model.')}
+          {term('g-w18', 'Rate limits.', 'Your plan’s usage windows (5 hours, 7 days). The Context tab shows how much of each is used and when it starts again.')}
           {term('g-w11', 'Added context.', 'Text the model reads besides your message: Claude Code’s reminders (a to-do list, a mode change), listings (skills, tools), files you mentioned, and what hooks and plugins add. It counts against the context like anything else.')}
           {term('g-w12', 'Rewritten call.', 'A call whose arguments a PreToolUse hook changed after the model asked for it: the tool ran with the hook’s version, not the model’s.')}
           {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
 
           {section('What Glass Box cannot see')}
           {para('g-limits', 'The model’s private reasoning, how a server tool worked inside (only its input and result reach the transcript), and anything that happened before Glass Box loaded. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
+        </Box>
+      )
+    }
+
+    // --- Context: the window, what fills it, cost, rate limits, compactions.
+
+    const TRIGGER: Record<string, string> = {
+      manual: 'you asked (/compact)',
+      auto: 'automatic, the context was nearly full',
+      plugin: 'asked by a plugin',
+    }
+
+    const compactionLine = (c: Compaction, indent: number) => {
+      const sizes =
+        c.tokensBefore !== null && c.tokensAfter !== null
+          ? ` · ${formatTokens(c.tokensBefore)} → ${formatTokens(c.tokensAfter)} tokens`
+          : ''
+
+      return (
+        <Box key={`compact-${c.id}`} paddingLeft={indent} marginTop={1} {...fit(indent)}>
+          {seg(room(indent + 2), [
+            { text: '⇣', color: c.skipped === null ? 'suggestion' : 'warning' },
+            { text: c.skipped === null ? ' Context compacted' : ' Compaction skipped', bold: true },
+            {
+              text: ` · ${TRIGGER[c.trigger] ?? c.trigger}${sizes} · ${formatDuration(c.durationMs)} · ${formatTime(c.at)}${c.skipped !== null ? ` · ${c.skipped}` : ''}`,
+              dim: true,
+            },
+          ])}
+        </Box>
+      )
+    }
+
+    const bar = (percent: number, width: number) => {
+      const filled = Math.round((Math.min(100, Math.max(0, percent)) / 100) * width)
+      return `${'█'.repeat(filled)}${'░'.repeat(width - filled)}`
+    }
+
+    const until = (iso: string) => {
+      const ms = Date.parse(iso) - Date.now()
+      if (!(ms > 0)) return 'now'
+      const hours = Math.floor(ms / 3_600_000)
+      const minutes = Math.round((ms % 3_600_000) / 60_000)
+      return hours >= 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+    }
+
+    const WINDOW_LABEL: Record<string, string> = { five_hour: '5 hours', seven_day: '7 days' }
+
+    const renderContext = () => {
+      const r = resourcesNow
+      const b = breakdownNow
+      const pct = r?.percent ?? (r?.contextTokens != null && r.window > 0 ? Math.round((r.contextTokens / r.window) * 100) : null)
+      const costed = allTurns.filter(t => t.costUsd !== null && t.agentId === null).slice(0, 8)
+
+      return (
+        <Box flexDirection="column">
+          {section('Context window')}
+          {para('c-intro', 'Everything the model reads at each step must fit in its context window: instructions, tools, the conversation, tool results. When it is nearly full, Claude Code compacts the conversation.', true)}
+          {r === null && para('c-none', 'Not measured yet: the figures arrive with the next response from the model.', true)}
+          {r !== null &&
+            line(
+              'c-fill',
+              pct !== null ? `${bar(pct, 20)} ${pct}%` : 'filled',
+              `${r.contextTokens !== null ? formatTokens(r.contextTokens) : '?'} of ${formatTokens(r.window)} tokens`,
+              26,
+            )}
+
+          {section('What fills it')}
+          <Box key="c-refresh" flexDirection="row" gap={1} paddingLeft={2}>
+            <Button key="ctx:refresh" dimColor label="Refresh" onPress={() => void quietly(() => refreshBreakdown($))} />
+            <Box {...fit(14)}>
+              {seg(room(14), [
+                {
+                  text: b === null
+                    ? 'Not counted yet: refreshed after responses, at most every 30 seconds.'
+                    : `Estimated at ${formatTime(b.at)} for ${shortModel(b.model)}, as /context counts it.`,
+                  dim: true,
+                },
+              ])}
+            </Box>
+          </Box>
+          {b !== null &&
+            b.categories
+              .filter(c => c.tokens > 0)
+              .map(c =>
+                line(
+                  `c-cat-${c.name}`,
+                  c.name,
+                  `${formatTokens(c.tokens)} tokens · ${b.maxTokens > 0 ? Math.round((c.tokens / b.maxTokens) * 100) : 0}%${c.kind === 'deferred' ? ' · loaded on demand, not counted' : ''}`,
+                  22,
+                ),
+              )}
+          {b !== null &&
+            para(
+              'c-auto',
+              b.isAutoCompactEnabled
+                ? `Auto-compaction is on${b.autoCompactThreshold !== null ? `: it runs at about ${formatTokens(b.autoCompactThreshold)} tokens` : ''}.`
+                : 'Auto-compaction is off: the conversation is only compacted when you ask (/compact).',
+              true,
+            )}
+          {b !== null && b.memoryFiles.length > 0 && (
+            <Box key="c-mem" flexDirection="column">
+              {para('c-mem-head', 'Memory and instruction files:')}
+              {b.memoryFiles.map(f => line(`c-mem-${f.path}`, f.type, `${formatTokens(f.tokens)} tokens · ${tidy(f.path)}`, 10))}
+            </Box>
+          )}
+          {b !== null && b.mcpServers.length > 0 && (
+            <Box key="c-mcp" flexDirection="column">
+              {para('c-mcp-head', 'MCP servers (their tools’ schemas):')}
+              {b.mcpServers.map(s =>
+                line(`c-mcp-${s.server}`, s.server, `${formatTokens(s.tokens)} tokens · ${plural(s.tools, 'tool', 'tools')}, ${s.loaded} loaded`, 22),
+              )}
+            </Box>
+          )}
+          {b !== null && (
+            <Box key="c-lists" flexDirection="column">
+              {b.skills !== null &&
+                line('c-skills', 'skills listing', `${formatTokens(b.skills.tokens)} tokens · ${b.skills.included} of ${b.skills.total} skills listed`, 22)}
+              {b.slashCommands !== null &&
+                line('c-cmds', 'commands listing', `${formatTokens(b.slashCommands.tokens)} tokens · ${b.slashCommands.included} of ${b.slashCommands.total} commands listed`, 22)}
+              {b.agents.count > 0 && line('c-agents', 'agent types', `${formatTokens(b.agents.tokens)} tokens · ${plural(b.agents.count, 'type', 'types')}`, 22)}
+            </Box>
+          )}
+
+          {section('Cost')}
+          {para('c-cost-intro', 'What this session has cost so far, as /cost totals it, and what each recent turn added to it (subagents included).', true)}
+          {(r === null || r.costUsd === null) && para('c-cost-none', 'No cost recorded yet, or this host keeps no cost ledger.', true)}
+          {r !== null && r.costUsd !== null && line('c-cost', 'this session', formatUsd(r.costUsd), 14)}
+          {costed.map(t =>
+            line(`c-cost-${t.id}`, formatTime(t.startedAt).slice(0, 5), `${formatUsd(t.costUsd ?? 0)} · ${t.prompt === '' ? '(continuation)' : `“${t.prompt}”`}`, 14),
+          )}
+
+          {section('Rate limits')}
+          {para('c-rl-intro', 'Your plan’s usage windows, as the last response reported them: how much is used and when each starts again.', true)}
+          {(r === null || r.rateLimits.length === 0) && para('c-rl-none', 'None reported yet.', true)}
+          {r !== null &&
+            r.rateLimits.map(l =>
+              line(
+                `c-rl-${l.kind}`,
+                WINDOW_LABEL[l.kind] ?? l.kind,
+                `${bar(l.percentUsed, 10)} ${l.percentUsed}%${l.resetsAt !== null ? ` · resets in ${until(l.resetsAt)} (${formatTime(Date.parse(l.resetsAt)).slice(0, 5)})` : ''}`,
+                10,
+              ),
+            )}
+
+          {section('Compactions')}
+          {para('c-compact-intro', 'When the context is nearly full, Claude Code replaces the conversation so far with a summary and goes on from it. You can ask for one with /compact. Each also shows in the Timeline, under its turn.', true)}
+          {compactionList.length === 0 && para('c-compact-none', 'None in this session yet.', true)}
+          {[...compactionList].reverse().map(c => compactionLine(c, 0))}
         </Box>
       )
     }
@@ -1608,6 +1906,7 @@ export const register: Register = on => {
               await update($, rewrites, () => [])
               await update($, injections, () => [])
               await update($, skills, () => [])
+              await update($, compactions, () => [])
               await update($, toggled, () => [])
             })
           }
@@ -1632,6 +1931,8 @@ export const register: Register = on => {
           ? renderStats()
           : current === 'instructions'
             ? renderInstructions()
+            : current === 'context'
+              ? renderContext()
             : current === 'guide'
               ? renderGuide()
               : renderTimeline()}
@@ -1646,7 +1947,7 @@ export const register: Register = on => {
             <Text dimColor wrap="wrap">
               Nothing yet. Send Claude a message: each turn, every step the model takes and every tool it calls will appear here as it happens.
             </Text>
-            <Text dimColor wrap="wrap">New to this? Open How it works (press 4 while the pane has the keyboard).</Text>
+            <Text dimColor wrap="wrap">New to this? Open How it works (press 5 while the pane has the keyboard).</Text>
           </Box>
         )}
         {allTurns.map((turn, i) => renderTurn(turn, i === 0))}

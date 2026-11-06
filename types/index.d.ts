@@ -1,5 +1,62 @@
 /** The pane's tabs. */
-export type View = 'timeline' | 'stats' | 'instructions' | 'guide'
+export type View = 'timeline' | 'stats' | 'instructions' | 'context' | 'guide'
+
+/** A rate-limit window, as the last response reported it. */
+export type RateLimit = {
+  /** five_hour, seven_day, or a gateway's own name. */
+  kind: string
+  percentUsed: number
+  /** ISO 8601, when it resets. */
+  resetsAt: string | null
+}
+
+/** The session's resources, as last measured. */
+export type Resources = {
+  at: number
+  /** Input tokens the last response was answered over. */
+  contextTokens: number | null
+  /** The model's context window, in tokens. */
+  window: number
+  percent: number | null
+  /** The session's cost so far, in US dollars, where the host keeps a ledger. */
+  costUsd: number | null
+  rateLimits: RateLimit[]
+}
+
+/** The context window by category, as /context breaks it down. */
+export type Breakdown = {
+  at: number
+  model: string
+  totalTokens: number
+  maxTokens: number
+  percentage: number
+  isAutoCompactEnabled: boolean
+  autoCompactThreshold: number | null
+  /** used, free, buffer or deferred, with /context's own labels. */
+  categories: { name: string; tokens: number; kind: string }[]
+  memoryFiles: { path: string; type: string; tokens: number }[]
+  /** MCP tool schemas, summed by server. */
+  mcpServers: { server: string; tools: number; loaded: number; tokens: number }[]
+  agents: { count: number; tokens: number }
+  skills: { total: number; included: number; tokens: number } | null
+  slashCommands: { total: number; included: number; tokens: number } | null
+}
+
+/** A compaction of the conversation, or one that was skipped. */
+export type Compaction = {
+  id: string
+  at: number
+  turnId: string | null
+  agentId: string | null
+  /** manual, auto, plugin or precompute. */
+  trigger: string
+  instructions: string | null
+  tokensBefore: number | null
+  tokensAfter: number | null
+  durationMs: number
+  /** Why it was skipped; null when it ran. */
+  skipped: string | null
+}
 
 /** One section of the system prompt, as it was sent. */
 export type PromptPart = {
@@ -93,6 +150,8 @@ export type Turn = {
   /** How it ended: answer, aborted, error, refusal; null while it runs. */
   outcome: string | null
   usage: Usage | null
+  /** What the session's cost grew by during the turn, in US dollars. */
+  costUsd: number | null
 }
 
 /** A step: one request to the model inside a turn. */
@@ -221,6 +280,9 @@ declare module 'claude-code' {
       context: Shaped<ContextSnapshot | null>
       skills: Shaped<SkillLoad[]>
       tools: Shaped<OfferedTool[]>
+      resources: Shaped<Resources | null>
+      breakdown: Shaped<Breakdown | null>
+      compactions: Shaped<Compaction[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

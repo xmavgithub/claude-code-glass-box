@@ -66,7 +66,7 @@ with your own numbers, plus a legend and a short glossary.
 
 ## What it shows
 
-The pane has four tabs (hotkeys `1` to `4` while it has the keyboard):
+The pane has five tabs (hotkeys `1` to `5` while it has the keyboard):
 
 - **Timeline**: every turn, step, server tool and tool call, as below.
 - **Stats**: the session at a glance: calls, failures and time per tool; what
@@ -77,6 +77,10 @@ The pane has four tabs (hotkeys `1` to `4` while it has the keyboard):
   The system prompt section by section (shared or yours, size, text); the
   blocks in front of the first message and the CLAUDE.md files behind them;
   the tools offered, loaded in full or behind ToolSearch; the skills loaded.
+- **Context**: how full the context window is and what fills it (system
+  prompt, tools, memory files, MCP servers, messages, free space), as
+  /context counts it; the session's cost and each recent turn's; the
+  rate-limit windows and when they reset; the compactions.
 - **How it works**: the loop above, a legend of the marks and colors, and a
   glossary (token, context, cache, effort, permission rule, hook, auto mode,
   subagent, MCP tool, server tool).

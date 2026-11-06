@@ -477,6 +477,84 @@ test('on a narrow pane a long command is cut to one line, on every surface', asy
   }
 })
 
+test('Context shows the window, what fills it, cost per turn, rate limits and compactions', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 1000) }))
+  let usd = 1
+  const resetsAt = new Date(Date.now() + 2 * 3_600_000 + 30 * 60_000).toISOString()
+  const measured = {
+    context: { tokens: 61_500, window: 1_000_000, percent: 6 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 38, resetsAt }],
+  }
+  on('session.usage', (_, e) => ({
+    value: {
+      startedAt: 0,
+      ...measured,
+      context: {
+        ...measured.context,
+        breakdown: (e as { breakdown?: string }).breakdown === undefined
+          ? undefined
+          : {
+              categories: [
+                { name: 'System prompt', tokens: 12_000, color: 'x', isDeferred: false, kind: 'used' },
+                { name: 'Messages', tokens: 40_000, color: 'x', isDeferred: false, kind: 'used' },
+                { name: 'Free space', tokens: 900_000, color: 'x', isDeferred: false, kind: 'free' },
+              ],
+              totalTokens: 61_500,
+              maxTokens: 1_000_000,
+              rawMaxTokens: 1_000_000,
+              autocompactSource: 'model-default',
+              percentage: 6,
+              gridRows: [],
+              model: 'claude-opus-5-5',
+              memoryFiles: [{ path: '/Users/me/.claude/CLAUDE.md', type: 'User', tokens: 900 }],
+              mcpTools: [
+                { name: 'mcp__ctx__a', serverName: 'ctx', tokens: 300, isLoaded: true },
+                { name: 'mcp__ctx__b', serverName: 'ctx', tokens: 200, isLoaded: false },
+              ],
+              agents: [],
+              autoCompactThreshold: 920_000,
+              isAutoCompactEnabled: true,
+              apiUsage: null,
+            },
+      },
+      cost: { usd },
+    },
+  }) as never)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }], tokensBefore: 182_000, tokensAfter: 24_000 }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('command.register', () => ({ value: { command: 'glass-box' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/Users/me/proj', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ turnId: 'T1', text: 'refactor the parser' })
+  // The model answered: the session now costs $0.42 more.
+  usd = 1.42
+  await $.session.measure({ ...measured, cost: { usd: 1.42 }, changed: ['context', 'cost'] } as never)
+  await $.session.compact({ trigger: 'auto', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+  await $.turn.complete({ turnId: 'T1', reason: 'answer', answer: 'Done.', durationMs: 9000, isAborted: false } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const timeline = await texts(ui)
+  expect(has(timeline, /^✓ Turn · .* · 9\.0s · \$0\.42$/)).toBe(true)
+  expect(has(timeline, /^⇣ Context compacted · automatic, the context was nearly full · 182\.0k → 24\.0k tokens/)).toBe(true)
+
+  await ui.press({ key: 'v:context' })
+  const all = await texts(ui)
+  expect(has(all, /^█░{19} 6% +61\.5k of 1\.00M tokens$/)).toBe(true)
+  expect(has(all, /^System prompt +12\.0k tokens · 1%$/)).toBe(true)
+  expect(all).toContain('Auto-compaction is on: it runs at about 920.0k tokens.')
+  expect(has(all, /^User +900 tokens · ~\/\.claude\/CLAUDE\.md$/)).toBe(true)
+  expect(has(all, /^ctx +500 tokens · 2 tools, 1 loaded$/)).toBe(true)
+  expect(has(all, /^this session +\$1\.42$/)).toBe(true)
+  expect(has(all, /^\d\d:\d\d +\$0\.42 · “refactor the parser”$/)).toBe(true)
+  expect(has(all, /^5 hours +█{4}░{6} 38% · resets in 2h (29|30)m/)).toBe(true)
+  await ui.unmount()
+})
+
 test('Clear empties the timeline', async ($, on) => {
   on('tool.call', () => ({ result: {}, text: 'ok' }))
   await $.tool.call({ tool: 'Read', file_path: '/a', tool_use_id: 'toolu_x' })

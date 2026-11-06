@@ -15,7 +15,7 @@ everything below is on `main`. 1.0 will be released when the criteria in
 #### The pane and its tabs
 
 - A live pane beside the chat, opened at session start on a wide terminal and
-  with `/glass-box` anywhere. Four tabs (hotkeys `1` to `4` while the pane has
+  with `/glass-box` anywhere. Five tabs (hotkeys `1` to `5` while the pane has
   the keyboard) and a **Clear** button (`c`).
 - **Timeline**: every turn (your message, or a subagent's prompt), every step
   (one request to the model), every server tool and every tool call, as they
@@ -30,6 +30,12 @@ everything below is on `main`. 1.0 will be released when the criteria in
   CLAUDE.md files behind them, with their kind and imports
   (`prompt.context`); the tools offered, loaded in full or behind ToolSearch,
   by provider (`tool.describe`); the skills loaded (`skill.prompt`).
+- **Context**: how full the context window is and what fills it, as
+  /context counts it (system prompt, tools, memory files, MCP servers,
+  messages, free space, the auto-compaction threshold), with a Refresh
+  button; the session's cost and what each recent turn added; the rate-limit
+  windows with when they reset; the compactions (`session.measure`,
+  `$.session.usage`, `session.compact`).
 - **How it works**: the agent loop in five steps with the numbers of your last
   turn, a legend of marks and colors, a glossary, and what Glass Box cannot
   see.
@@ -51,6 +57,9 @@ everything below is on `main`. 1.0 will be released when the criteria in
   call is marked `rewritten` and shows both versions
   (`git status → rtk git status`), from the hooks' own answer
   (`classic.PreToolUse`).
+- **Cost per turn** in each turn's header, and **compactions** as rows under
+  their turn: what triggered them, tokens before and after, or why they
+  were skipped.
 - **Added to the context**: under each turn, everything Claude Code put in
   front of the model besides your message: its reminders and listings,
   mentioned files, settings hooks' output by event, plugins' context, with
