@@ -17,6 +17,7 @@ import type {
   Resources,
   Rewrite,
   SkillLoad,
+  TelemetryRow,
   ServerTool,
   Spawn,
   Submission,
@@ -103,6 +104,13 @@ const MAX_MODS = 50
 const agentTypes = atom({ plugin: 'glass-box', key: 'agentTypes' } as const, [], { shape: 'agentTypes-1' })
 const MAX_AGENT_TYPES = 100
 const agentTypeSeen = new Map<string, string>()
+// Telemetry as Claude Code logs it: kept here and written at most every
+// two seconds (and at a turn's end), as records come often.
+const telemetry = atom({ plugin: 'glass-box', key: 'telemetry' } as const, { counts: {}, recent: [] }, { shape: 'telemetry-1' })
+const MAX_TELEMETRY = 100
+const TELEMETRY_EVERY_MS = 2000
+let telemetryBuffer: TelemetryRow[] = []
+let telemetryAt = 0
 // The slash commands that ran and the settings that changed.
 const actions = atom({ plugin: 'glass-box', key: 'actions' } as const, [], { shape: 'actions-1' })
 const MAX_ACTIONS = 100
@@ -524,6 +532,19 @@ function collect(value: unknown, key: string, out: string[] = [], depth = 0): st
   return out
 }
 
+/** Writes the buffered telemetry rows: their counts, and the latest ones. */
+async function flushTelemetry($: EngineInterface) {
+  if (telemetryBuffer.length === 0) return
+  const rows = telemetryBuffer
+  telemetryBuffer = []
+  telemetryAt = Date.now()
+  await update($, telemetry, t => {
+    const counts = { ...t.counts }
+    for (const row of rows) counts[row.event] = (counts[row.event] ?? 0) + 1
+    return { counts, recent: [...t.recent, ...rows].slice(-MAX_TELEMETRY) }
+  })
+}
+
 /** Records a message between agents under the latest turn of its loop. */
 async function post(
   $: EngineInterface,
@@ -830,6 +851,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     await quietly(() => fillServerResults($, e.agentId ?? null))
+    await quietly(() => flushTelemetry($))
     // A subagent's row is open by default while it works and closed once done:
     // forget a flip made while it worked, so a row closed stays closed.
     const finished = e.agentId
@@ -1189,6 +1211,20 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // What Claude Code sends to the telemetry collector your operator
+  // configured. Anthropic's own stream is for the CLI's built-in plugins: a
+  // mod's hook on it does not load, so only the collector is named here.
+  on('telemetry.log', { to: 'collector' }, async ($, e, next) => {
+    const answer = await next(e)
+    await quietly(async () => {
+      if (e.to !== 'collector') return
+      telemetryBuffer.push({ at: await now($), event: e.event, detail: clip(JSON.stringify(e.attributes), MAX_CHANGE) })
+      if (Date.now() - telemetryAt > TELEMETRY_EVERY_MS) await flushTelemetry($)
+    })
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // A slash command, the way it was typed, and what it printed and left for
   // the model to read.
   on('command.run', async ($, e, next) => {
@@ -1348,7 +1384,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList, actionList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList, modList, mailList, agentTypeList, actionList, telemetryNow] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1363,6 +1399,7 @@ export const register: Register = on => {
         read($, mail),
         read($, agentTypes),
         read($, actions),
+        read($, telemetry),
       ])
 
     const columns = e.props.bodyColumns
@@ -2307,7 +2344,7 @@ export const register: Register = on => {
       const models = new Map<string, number>()
       for (const s of stepList) models.set(shortModel(s.model), (models.get(shortModel(s.model)) ?? 0) + 1)
 
-      if (callList.length === 0 && stepList.length === 0 && injectionList.length === 0) {
+      if (callList.length === 0 && stepList.length === 0 && injectionList.length === 0 && telemetryNow.recent.length === 0) {
         return <Text dimColor>No activity recorded yet.</Text>
       }
 
@@ -2359,11 +2396,56 @@ export const register: Register = on => {
           {line('m-ctx', 'context', `largest ${formatTokens(peak)} tokens${context > 0 ? ` · ${Math.round((cached / context) * 100)}% read from cache` : ''}`, 13)}
           {line('m-stop', 'stops', [...stops.entries()].map(([label, n]) => `${label} ${n}`).join(' · ') || '—', 13)}
           {line('m-models', 'models', [...models.entries()].map(([m, n]) => `${m} ${n}`).join(' · ') || '—', 13)}
+
+          {renderTelemetry()}
           <Box paddingLeft={2} marginTop={1} {...fit(2)}>
             <Text dimColor wrap="wrap">
               {`Over what Glass Box keeps: the last ${MAX_TURNS} turns and ${MAX_CALLS} tool calls. Time in tools adds up calls that ran in parallel.`}
             </Text>
           </Box>
+        </Box>
+      )
+    }
+
+    // --- Telemetry: what Claude Code logs about the session, and where to.
+
+    const renderTelemetry = () => {
+      const byEvent = Object.entries(telemetryNow.counts).sort((a, b) => b[1] - a[1])
+      const total = byEvent.reduce((n, [, c]) => n + c, 0)
+
+      return (
+        <Box flexDirection="column">
+          {section('Telemetry')}
+          {para(
+            't-intro',
+            'What Claude Code sends to the telemetry collector your operator configured (OpenTelemetry), if any. Anthropic’s own analytics and feature marks are open to the plugins built into the CLI only: a mod cannot see them, so they are not here. Glass Box only shows; it sends nothing.',
+            true,
+          )}
+          {total === 0
+            ? line('t-none', 'to your collector', 'nothing: no collector configured, or nothing sent to it yet', 18)
+            : line('t-total', 'to your collector', `${plural(total, 'record', 'records')} · ${plural(byEvent.length, 'kind', 'kinds')}`, 18)}
+          {byEvent.length > 0 &&
+            toggleRow('st:tel:events', 0, [{ text: 'By event', bold: true }, { text: ` · ${plural(byEvent.length, 'kind', 'kinds')}`, dim: true }], () => (
+              <Box flexDirection="column">
+                {byEvent.map(([event, n]) => line(`t-e-${event}`, `${n}×`, `claude_code.${event}`, 6))}
+              </Box>
+            ))}
+          {telemetryNow.recent.length > 0 &&
+            toggleRow('st:tel:recent', 0, [{ text: 'Latest records', bold: true }, { text: ` · the last ${telemetryNow.recent.length}`, dim: true }], () => (
+              <Box flexDirection="column">
+                {[...telemetryNow.recent].reverse().map((row, i) => (
+                  <Box key={`t-r-${i}`} flexDirection="column" paddingLeft={2} marginTop={1} {...fit(2)}>
+                    {seg(room(4), [
+                      { text: `claude_code.${row.event}`, bold: true },
+                      { text: ` · ${formatTime(row.at)}`, dim: true },
+                    ])}
+                    <Text wrap="wrap" dimColor>
+                      {row.detail}
+                    </Text>
+                  </Box>
+                ))}
+              </Box>
+            ))}
         </Box>
       )
     }
@@ -2979,6 +3061,7 @@ export const register: Register = on => {
               await update($, messages, () => [])
               await update($, mail, () => [])
               await update($, actions, () => [])
+              await update($, telemetry, () => ({ counts: {}, recent: [] }))
               await update($, toggled, () => [])
             })
           }

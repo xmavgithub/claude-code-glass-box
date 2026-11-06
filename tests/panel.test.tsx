@@ -975,3 +975,35 @@ test('slash commands and setting changes are rows of their own among the turns',
     await ui.unmount()
   }
 })
+
+test('Stats shows what was sent to the operator’s telemetry collector, and says Anthropic’s stream is out of reach', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('telemetry.log', () => ({ value: undefined }))
+
+  await $.turn.start({ turnId: 'T1', text: 'hello' })
+  for (const event of ['api_request', 'api_request', 'tool_result']) {
+    await $.telemetry.log({ to: 'collector', event, attributes: { model: 'claude-opus-5-5', duration_ms: 1200 }, loggedAt: '2026-11-06T10:00:00.000Z' } as never)
+  }
+  // The buffer is written at the turn's end at the latest.
+  await $.turn.complete({ turnId: 'T1', reason: 'answer', answer: 'Hi', durationMs: 1000, isAborted: false } as never)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'v:stats' })
+    const all = await texts(ui)
+    expect(has(all, /Anthropic’s own analytics and feature marks are open to the plugins built into the CLI only/)).toBe(true)
+    expect(has(all, /^to your collector *  3 records · 2 kinds$/)).toBe(true)
+    await ui.press({ key: 'st:tel:events' })
+    await ui.press({ key: 'st:tel:recent' })
+    const open = await texts(ui)
+    expect(has(open, /^2× *  claude_code\.api_request$/)).toBe(true)
+    expect(open).toContain('{"model":"claude-opus-5-5","duration_ms":1200}')
+    await ui.press({ key: 'st:tel:recent' })
+    await ui.press({ key: 'st:tel:events' })
+    await ui.press({ key: 'v:timeline' })
+    await ui.unmount()
+  }
+})

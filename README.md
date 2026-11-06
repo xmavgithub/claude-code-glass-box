@@ -73,7 +73,8 @@ beside the session's counts, a **Guide** button (`g`):
 - **Stats**: the session at a glance: calls, failures and time per tool; what
   the permission checks came to and which rules allowed the most; what was
   added to the context, by source; time in the model against time in tools,
-  tokens, context and cache, stop reasons.
+  tokens, context and cache, stop reasons; what was sent to the telemetry
+  collector your operator configured, if any.
 - **Prompt**: what the model is told before it reads the conversation.
   The system prompt section by section (shared or yours, size, text); the
   blocks in front of the first message and the CLAUDE.md files behind them;
@@ -153,6 +154,7 @@ not installed.
 
 | Event | What Glass Box records |
 | --- | --- |
+| `telemetry.log` (collector) | The records Claude Code sends to the OpenTelemetry collector your operator configured: event and attributes |
 | `command.run` / `config.set` | Slash commands that ran, with their output and notes for the model; `/config` changes, before and after, or why refused |
 | `agent.offer` | Each agent type offered to the model: its source and provider, when to use it, and whether a plugin kept it from the model |
 | `session.send` / `session.receive` | Messages between agents and sessions: recipient or sender, delivered or not, taken or changed by a plugin, text |
@@ -177,6 +179,10 @@ not installed.
 
 ## Limitations
 
+- Anthropic's own telemetry (first-party analytics and feature marks) is open
+  to the plugins built into the CLI only: a mod's hook on it does not load.
+  Glass Box shows what goes to your operator's collector, and says that the
+  rest is out of its reach.
 - Thinking is shown as Claude Code receives it: it may be a summary of the
   model's reasoning. Some models think without sending any text of it; once
   the step is over Glass Box reads the transcript and says whether the model

@@ -25,7 +25,10 @@ everything below is on `main`. 1.0 will be released when the criteria in
 - **Stats**: calls, failures and time per tool; what the permission checks
   came to and which settings rules allowed the most calls; what was added to
   the context, by source; time in the model against time in tools, output
-  tokens, peak context and cache share, stop reasons, models.
+  tokens, peak context and cache share, stop reasons, models; the records
+  sent to the telemetry collector your operator configured, by event and
+  latest first (`telemetry.log` on `collector`), and the note that
+  Anthropic's own analytics are open to the CLI's built-in plugins only.
 - **Prompt**: what the model is told before it reads the conversation. The
   system prompt section by section, shared or yours, with size and text
   (`prompt.compose`), one per kind of request, each saying what it was for:

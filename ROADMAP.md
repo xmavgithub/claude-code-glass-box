@@ -121,8 +121,10 @@ operations on `$`) against what Glass Box records. In order of value:
   tools in the Prompt tab (`agent.offer`).
 - [x] **Commands and settings.** The slash commands you run and the
   `/config` rows that change, as Timeline rows (`command.run`, `config.set`).
-- [ ] **Telemetry.** What Claude Code logs and where it sends it, kept in the
-  pane only (`telemetry.log`, `telemetry.mark`).
+- [x] **Telemetry.** What Claude Code sends to your operator's collector,
+  kept in the pane only (`telemetry.log` on `collector`). Anthropic's own
+  stream and feature marks are open to the CLI's built-in plugins only: a
+  mod's hook on them does not load, so they are out of reach.
 - [ ] **What other plugins do.** Their model calls, MCP calls, network
   requests and processes, through `$` (`model.complete`, `mcp.call`,
   `http.fetch`, `process.run`).
@@ -132,7 +134,9 @@ operations on `$`) against what Glass Box records. In order of value:
   descriptions, the engine's lifecycle (`engine.create`, `session.end`,
   surfaces attaching), the clock, stores, state and environment;
   `prompt.section` and `prompt.mention`, covered by `prompt.compose` and
-  `prompt.attachment`; `attribution.text`.
+  `prompt.attachment`; `attribution.text`; Anthropic's own telemetry and
+  feature marks (`telemetry.log` on `anthropic`, `telemetry.mark`), which
+  only the CLI's built-in plugins may hook.
 
 ## Later
 

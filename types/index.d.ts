@@ -146,6 +146,25 @@ export type Letter = {
   rewritten: boolean
 }
 
+/**
+ * One record Claude Code sent to the telemetry collector your operator
+ * configured. (Anthropic's own analytics are for the CLI's built-in plugins
+ * only: a mod cannot observe them.)
+ */
+export type TelemetryRow = {
+  at: number
+  /** The record's event; it leaves named `claude_code.<event>`. */
+  event: string
+  /** Its attributes as JSON, clipped. */
+  detail: string
+}
+
+/** The collector's records over the session: counts by event, and the latest. */
+export type Telemetry = {
+  counts: Record<string, number>
+  recent: TelemetryRow[]
+}
+
 /** A slash command that ran, or a `/config` row that changed. */
 export type Action = {
   id: string
@@ -464,6 +483,7 @@ declare module 'claude-code' {
       mail: Shaped<Letter[]>
       agentTypes: Shaped<OfferedAgent[]>
       actions: Shaped<Action[]>
+      telemetry: Shaped<Telemetry>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */
