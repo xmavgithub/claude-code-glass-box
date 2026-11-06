@@ -15,6 +15,7 @@ import type {
   SkillLoad,
   ServerTool,
   Spawn,
+  Submission,
   Step,
   ToolCall,
   Turn,
@@ -88,6 +89,11 @@ const MAX_COMPACTIONS = 50
 // The subagents started, each tied to the call that started it.
 const agents = atom({ plugin: 'glass-box', key: 'agents' } as const, [], { shape: 'agents-1' })
 const MAX_AGENTS = 100
+// Every message that entered the session, with where it came from.
+const messages = atom({ plugin: 'glass-box', key: 'messages' } as const, [], { shape: 'messages-1' })
+const MAX_MESSAGES = 100
+// How soon a message sent to an idle session starts its turn, at most.
+const IDLE_START_MS = 30_000
 // The /context-style breakdown is estimated locally: at most this often.
 const BREAKDOWN_EVERY_MS = 30_000
 let lastBreakdownAt = 0
@@ -292,6 +298,33 @@ function originOf(text: string): { from: TurnFrom; body: string } | null {
   return null
 }
 
+/**
+ * Where a message came from, as `prompt.submit`'s `origin` names it: who sent
+ * it, in words, and the title of a turn it starts (null: shown as a Turn).
+ */
+const ORIGIN: Record<string, { who: string; title: string | null }> = {
+  composer: { who: 'You', title: null },
+  bridge: { who: 'You, through Remote Control (phone or web)', title: null },
+  'slack-ping': { who: 'You, from Slack', title: null },
+  sdk: { who: 'The SDK host (claude -p, the Agent SDK)', title: null },
+  'task-notification': { who: 'A background task, ending', title: 'Background task ended' },
+  'scheduled-trigger': { who: 'A scheduled task or /loop', title: 'Scheduled prompt' },
+  peer: { who: 'Another Claude session', title: 'Message from another session' },
+  'peer-send-message': { who: 'Another agent, through SendMessage', title: 'Message from another agent' },
+  'projects-relay': { who: 'A coordinating session', title: 'Relayed message' },
+  channel: { who: 'A channel an MCP server relays', title: 'Message from a channel' },
+  coordinator: { who: 'A coordinating session, handing work off', title: 'Hand-off from the coordinator' },
+  observer: { who: 'An observer agent', title: 'Observer’s report' },
+  'observer-activity': { who: 'An activity digest', title: 'Activity digest' },
+  'auto-continuation': { who: 'Claude Code, following up an action of yours', title: 'Automatic follow-up' },
+  unclassified: { who: 'An origin Claude Code cannot name', title: 'Message of unknown origin' },
+  plugin: { who: 'A plugin', title: 'Prompt from a plugin' },
+}
+
+/** Who sent a message, with the channel or plugin it names. */
+const whoSent = (m: Submission) =>
+  `${ORIGIN[m.kind]?.who ?? m.kind}${m.name !== null ? ` (${m.name})` : ''}`
+
 /** What a step's open details say of its thinking when no text of it came. */
 const THINKING_SEEN: Record<string, string> = {
   omitted:
@@ -307,6 +340,7 @@ const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string 
   aborted: { icon: '⊘', color: 'warning', label: 'interrupted' },
   error: { icon: '✗', color: 'error', label: 'failed' },
   refusal: { icon: '✗', color: 'error', label: 'refused' },
+  blocked: { icon: '⊘', color: 'error', label: 'blocked' },
 }
 
 /** Why the model stopped writing, in plain words. `tool_use` is told with its count. */
@@ -589,9 +623,64 @@ export const register: Register = on => {
     return { text: 'Glass Box opened.' }
   })
 
+  // Every message entering the session, from you or anything else, with the
+  // origin the engine stamps on it. Recorded before `next`: the turn it starts
+  // begins inside it, and `turn.start` ties itself to the record.
+  on('prompt.submit', async ($, e, next) => {
+    const at = await now($)
+    const id = `${at}-${injectionSeq++}`
+    const origin = e.origin
+    await quietly(() =>
+      update($, messages, list =>
+        [
+          ...list,
+          {
+            id,
+            at,
+            kind: origin.kind,
+            name: origin.kind === 'channel' ? origin.server : origin.kind === 'plugin' ? origin.name : null,
+            typed: clip(e.text, MAX_PROMPT),
+            sent: null,
+            during: e.turnId ?? null,
+            startedTurn: null,
+            dropped: null,
+          } satisfies Submission,
+        ].slice(-MAX_MESSAGES),
+      ),
+    )
+    const answer = await next(e)
+    // What a hook beneath did: changed the text, or stopped the message.
+    const changed = answer.drop === undefined && answer.text !== e.text ? clip(answer.text, MAX_PROMPT) : null
+    if (changed !== null || answer.drop !== undefined) {
+      await quietly(() =>
+        update($, messages, list =>
+          list.map(m => (m.id === id ? { ...m, sent: changed, dropped: answer.drop ?? null } : m)),
+        ),
+      )
+    }
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   // A turn: the prompt that starts it, on the main loop or in a subagent.
   on('turn.start', async ($, e, next) => {
     const startedAt = await now($)
+    // The message that starts a main-loop turn: the queued one with its text,
+    // else the oldest one sent while the session was idle. One that arrived
+    // during a turn and starts none went into that turn.
+    if (e.agentId === undefined) {
+      await quietly(() =>
+        update($, messages, list => {
+          const waiting = list.filter(m => m.startedTurn === null && m.dropped === null)
+          // An idle session starts the turn at once: an older message (a
+          // slash command that ran locally, say) started none.
+          const match =
+            waiting.find(m => m.typed === clip(e.text, MAX_PROMPT)) ??
+            waiting.find(m => m.during === null && startedAt - m.at < IDLE_START_MS)
+          return match === undefined ? list : list.map(m => (m.id === match.id ? { ...m, startedTurn: e.turnId } : m))
+        }),
+      )
+    }
     await quietly(async () => {
       const before = await read($, turns)
       // On the main loop, a turn may start from a subagent's report or a
@@ -1077,7 +1166,7 @@ export const register: Register = on => {
         read($, rewrites),
         read($, injections),
       ])
-    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList] =
+    const [promptList, contextNow, skillList, toolList, resourcesNow, breakdownNow, compactionList, spawnList, messageList] =
       await Promise.all([
         read($, prompts),
         read($, contextSnapshot),
@@ -1087,6 +1176,7 @@ export const register: Register = on => {
         read($, breakdown),
         read($, compactions),
         read($, agents),
+        read($, messages),
       ])
 
     const columns = e.props.bodyColumns
@@ -1213,7 +1303,26 @@ export const register: Register = on => {
       turnsBySpawn.set(spawnKey(owner), list)
       nestedTurns.add(turn.id)
     }
-    const topTurns = allTurns.filter(t => !nestedTurns.has(t.id))
+    // A message stopped before it entered ran no turn: it gets a row of its
+    // own among the turns, at its time.
+    const blockedById = new Map(messageList.filter(m => m.dropped !== null).map(m => [`blocked:${m.id}`, m]))
+    const topTurns = [
+      ...allTurns.filter(t => !nestedTurns.has(t.id)),
+      ...[...blockedById].map(
+        ([id, m]): Turn => ({
+          id,
+          agentId: null,
+          prompt: m.typed,
+          startedAt: m.at,
+          durationMs: 0,
+          outcome: 'blocked',
+          usage: null,
+          costUsd: null,
+          from: null,
+          frame: null,
+        }),
+      ),
+    ].sort((a, b) => b.startedAt - a.startedAt)
     // Guards against drawing an agent inside itself.
     const drawing = new Set<string>()
 
@@ -1588,7 +1697,8 @@ export const register: Register = on => {
       const icon = outcome?.icon ?? '●'
       const color = outcome?.color ?? 'warning'
       const lastUsage = [...turnSteps].reverse().find(s => s.usage !== null)?.usage ?? null
-      const meta = [
+      const blocked = blockedById.get(turn.id)
+      const meta = (blocked !== undefined ? [formatTime(turn.startedAt).slice(0, 5), 'blocked'] : [
         formatTime(turn.startedAt).slice(0, 5),
         plural(turnSteps.length, 'step', 'steps'),
         plural(toolCount, 'tool call', 'tool calls'),
@@ -1596,20 +1706,39 @@ export const register: Register = on => {
         outcome === undefined ? 'running' : formatDuration(turn.durationMs),
         turn.costUsd !== null ? formatUsd(turn.costUsd) : null,
         outcome?.label ?? null,
-      ]
+      ])
         .filter(part => part !== null)
         .join(' · ')
       const from = turn.from
+      // The message that started it, as Claude Code stamped its origin.
+      const startedBy = blocked ?? messageList.find(m => m.startedTurn === turn.id)
+      const by = startedBy !== undefined ? ORIGIN[startedBy.kind] : undefined
+      const byTitle =
+        startedBy === undefined || by?.title == null
+          ? null
+          : startedBy.kind === 'plugin' && startedBy.name !== null
+            ? `Prompt from plugin ${startedBy.name}`
+            : startedBy.kind === 'channel' && startedBy.name !== null
+              ? `Message from ${startedBy.name}`
+              : by.title
+      const notYou = from !== null || byTitle !== null
+      const during = blocked !== undefined ? [] : messageList.filter(m => m.during === turn.id && m.startedTurn === null && m.dropped === null)
       const prompt =
         turn.prompt === ''
           ? '(no prompt: a continuation, or started before Glass Box loaded)'
           : from !== null
             ? turn.prompt
-            : `“${turn.prompt}”`
+            : notYou
+              ? turn.prompt
+              : `“${turn.prompt}”`
       const reporter = from?.agentId != null ? spawnList.find(sp => sp.agentId === from.agentId) : undefined
       const label =
         from?.kind === 'report'
           ? ` Report from ${reporter !== undefined ? `subagent ${reporter.type}` : 'a subagent'}`
+          : byTitle !== null
+            ? ` ${byTitle}`
+            : blocked !== undefined
+              ? ' Message'
           : from?.kind === 'message'
             ? ' Message from another agent'
             : from?.kind === 'task'
@@ -1624,7 +1753,13 @@ export const register: Register = on => {
             ? 'Not typed by you: another agent’s message, handed to the main loop as a new message, started this turn.'
             : from?.kind === 'task'
               ? `Not typed by you: Claude Code told the main loop that a background task ended${from.summary !== null ? ` (${from.summary})` : ''}, and that started this turn.`
-              : null
+              : startedBy !== undefined && byTitle !== null
+                ? `Not typed by you: ${whoSent(startedBy)} sent this message, and it started this turn.`
+                : null
+      const stamp =
+        startedBy !== undefined
+          ? `Claude Code stamps its origin as “${startedBy.kind}”.`
+          : 'Glass Box tells this from the frame around the text.'
 
       return (
         <Box key={`turn-${turn.id}`} flexDirection="column" marginTop={1}>
@@ -1639,20 +1774,64 @@ export const register: Register = on => {
             </Box>
           </Box>
           <Box paddingLeft={2} {...fit(2)}>
-            <Text color={from === null ? 'claude' : undefined} wrap={open ? 'wrap' : 'truncate-end'}>
+            <Text color={notYou ? undefined : 'claude'} wrap={open ? 'wrap' : 'truncate-end'}>
               {open ? prompt : cut(prompt, room(2))}
             </Text>
           </Box>
-          {open && fromText !== null && (
-            <Box flexDirection="column" paddingLeft={2} {...fit(2)}>
+          {startedBy?.sent != null && (
+            <Box paddingLeft={2} {...fit(2)}>
+              {seg(room(4), [
+                { text: '✎', color: 'suggestion' },
+                { text: ' changed by a hook before the model read it', color: 'suggestion' },
+              ])}
+            </Box>
+          )}
+          {open && startedBy?.sent != null && (
+            <Box paddingLeft={2} {...fit(2)}>
               <Text dimColor wrap="wrap">
-                {`${fromText} Glass Box tells this from the frame around the text; below, the text as the model read it.`}
-              </Text>
-              <Text dimColor wrap="wrap">
-                {turn.frame ?? ''}
+                {`A UserPromptSubmit hook (from your settings or a plugin) changed the message on its way in. It was sent as: “${startedBy.typed}”. The model read the text above.`}
               </Text>
             </Box>
           )}
+          {open && blocked !== undefined && (
+            <Box paddingLeft={2} {...fit(2)}>
+              <Text color="error" wrap="wrap">
+                {`This message did not enter, so no turn ran: ${blocked.dropped}. ${whoSent(blocked)} sent it; a hook or Claude Code stopped it.`}
+              </Text>
+            </Box>
+          )}
+          {open && startedBy !== undefined && blocked === undefined && byTitle === null && startedBy.kind !== 'composer' && (
+            <Box paddingLeft={2} {...fit(2)}>
+              <Text dimColor wrap="wrap">
+                {`Sent by ${whoSent(startedBy)}.`}
+              </Text>
+            </Box>
+          )}
+          {open && fromText !== null && (
+            <Box flexDirection="column" paddingLeft={2} {...fit(2)}>
+              <Text dimColor wrap="wrap">
+                {`${fromText} ${stamp}${turn.frame !== null ? ' Below, the text as the model read it.' : ''}`}
+              </Text>
+              {turn.frame !== null && (
+                <Text dimColor wrap="wrap">
+                  {turn.frame}
+                </Text>
+              )}
+            </Box>
+          )}
+          {open &&
+            during.map(m => (
+              <Box key={`during-${m.id}`} flexDirection="column" paddingLeft={2} marginTop={1} {...fit(2)}>
+                {seg(room(4), [
+                  { text: '↳', color: 'suggestion' },
+                  { text: ` ${whoSent(m)}`, bold: true },
+                  { text: ` · ${formatTime(m.at)} · arrived while this turn ran`, dim: true },
+                ])}
+                <Text wrap="wrap" color={m.kind === 'composer' ? 'claude' : undefined}>
+                  {m.kind === 'composer' ? `“${m.typed}”` : m.typed}
+                </Text>
+              </Box>
+            ))}
           {open && turn.agentId !== null && !nested && (
             <Box paddingLeft={2} {...fit(2)}>
               <Text dimColor wrap="wrap">
@@ -2380,6 +2559,7 @@ export const register: Register = on => {
               await update($, skills, () => [])
               await update($, compactions, () => [])
               await update($, agents, () => [])
+              await update($, messages, () => [])
               await update($, toggled, () => [])
             })
           }

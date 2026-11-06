@@ -98,6 +98,29 @@ export type Spawn = {
   denied: string | null
 }
 
+/**
+ * A message that entered the session (or was stopped before it did): where it
+ * came from, as Claude Code stamps it, and the turn it started.
+ */
+export type Submission = {
+  id: string
+  at: number
+  /** The engine's origin: composer (your Enter), task-notification, peer, plugin… */
+  kind: string
+  /** The channel server or the plugin, for those origins. */
+  name: string | null
+  /** The text as it reached Glass Box, clipped. */
+  typed: string
+  /** The text that entered, when a hook beneath changed it; clipped. */
+  sent: string | null
+  /** The turn that was running when it arrived, if any. */
+  during: string | null
+  /** The turn it started; null while queued, or when it went into a running turn. */
+  startedTurn: string | null
+  /** Why it did not enter; null when it did. */
+  dropped: string | null
+}
+
 /** One section of the system prompt, as it was sent. */
 export type PromptPart = {
   id: string
@@ -354,6 +377,7 @@ declare module 'claude-code' {
       breakdown: Shaped<Breakdown | null>
       compactions: Shaped<Compaction[]>
       agents: Shaped<Spawn[]>
+      messages: Shaped<Submission[]>
       /** Keys of the items the person opened or closed, against their default. */
       toggled: Shaped<string[]>
       /** The tab the pane shows. */

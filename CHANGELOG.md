@@ -86,12 +86,15 @@ everything below is on `main`. 1.0 will be released when the criteria in
   the step is over tells which: the model thought with no text sent, its
   thinking came back redacted, or it did not think; text the stream did not
   carry is taken from the transcript (`$.session.messages`).
-- **Turns you did not type** are named by what started them: "Report from
-  subagent Explore" when a background agent hands its final report to the
-  main loop, "Message from another agent", "Background task ended". The
-  prompt line shows the text inside the frame; open, the turn says how it
-  started and shows the whole text as the model read it. The subagent's row
-  says when it reported back.
+- **Where each message came from**, from the origin Claude Code stamps on
+  it (`prompt.submit`): a turn you did not type is titled by its sender
+  ("Report from subagent Explore", "Background task ended", "Message from
+  another session", "Prompt from plugin …", "Scheduled prompt"…); open, it
+  says who sent it and shows its whole text as the model read it. A
+  subagent's row says when it reported back. Messages that arrive while a
+  turn runs (yours typed meanwhile, a task's notification) are listed under
+  it. When a hook changes your message the turn is marked `✎` and shows what
+  you typed; a message a hook stops gets a `⊘ blocked` row with the reason.
 
 #### Clarity
 

@@ -780,3 +780,49 @@ test('a step shows its thinking, and what the transcript says when no text of it
     await ui.unmount()
   }
 })
+
+test('each turn says where its message came from, what a hook changed, and what arrived meanwhile', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_, e) =>
+    e.text === 'secret'
+      ? { drop: 'it names a secret' }
+      : { text: e.text === 'fix it' ? 'fix it, and run the tests' : e.text, origin: e.origin },
+  )
+
+  const submit = (text: string, origin: Record<string, unknown>, turnId?: string) =>
+    $.prompt.submit({ text, origin, wait: false, attachments: [], context: [], ...(turnId ? { turnId } : {}) } as never)
+
+  await submit('hello', { kind: 'composer' })
+  await $.turn.start({ turnId: 'T1', text: 'hello' })
+  await submit('fix it', { kind: 'composer' })
+  await $.turn.start({ turnId: 'T2', text: 'fix it, and run the tests' })
+  await submit('also check the README', { kind: 'composer' }, 'T2')
+  await submit('Build finished', { kind: 'task-notification' }, 'T2')
+  await submit('daily summary', { kind: 'plugin', name: 'reminder' })
+  await $.turn.start({ turnId: 'T3', text: 'daily summary' })
+  await submit('secret', { kind: 'composer' })
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const all0 = await texts(ui)
+    // The blocked message is the newest row, open by default.
+    expect(has(all0, /^⊘ Message · \d\d:\d\d · blocked$/)).toBe(true)
+    expect(has(all0, /^This message did not enter, so no turn ran: it names a secret\. You sent it/)).toBe(true)
+    expect(has(all0, /^● Prompt from plugin reminder · /)).toBe(true)
+    expect(all0).toContain('“hello”')
+    expect(all0).toContain('✎ changed by a hook before the model read it')
+
+    const open = ['t:T1', 't:T2', 't:T3']
+    for (const key of open) await ui.press({ key })
+    const all = await texts(ui)
+    expect(has(all, /It was sent as: “fix it”\. The model read the text above\./)).toBe(true)
+    expect(has(all, /^↳ You · .* · arrived while this turn ran$/)).toBe(true)
+    expect(all).toContain('“also check the README”')
+    expect(has(all, /^↳ A background task, ending · /)).toBe(true)
+    expect(has(all, /^Not typed by you: A plugin \(reminder\) sent this message, and it started this turn\. Claude Code stamps its origin as “plugin”\.$/)).toBe(true)
+    for (const key of [...open].reverse()) await ui.press({ key })
+    await ui.unmount()
+  }
+})

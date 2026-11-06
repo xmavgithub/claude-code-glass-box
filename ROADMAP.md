@@ -106,7 +106,7 @@ Code events they build on.
 An inventory of the events Claude Code exposes (47 engine events, 67
 operations on `$`) against what Glass Box records. In order of value:
 
-- [ ] **Where each message came from.** Your Enter, a background task's
+- [x] **Where each message came from.** Your Enter, a background task's
   notification, another session, a scheduled task, a plugin, a channel such
   as Slack, the phone: the engine's own `origin`, in place of reading the
   frame around the text. And when a hook changed your message before the

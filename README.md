@@ -90,7 +90,7 @@ In the Timeline:
 
 | Level | What you see | Expanded |
 | --- | --- | --- |
-| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by what started it: a background subagent's report, another agent's message, a background task's end | Its steps; for a turn you did not type, how it started and its whole text, frame included, as the model read it |
+| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by where its message came from, as Claude Code stamps it: a background subagent's report, another session or agent, a background task, a scheduled task, a plugin, a channel. `✎` when a hook changed your message | Its steps; for a turn you did not type, who sent it and its whole text as the model read it; what you typed when a hook changed it; the messages that arrived while it ran. A message a hook stopped gets a `⊘ blocked` row with the reason |
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of its thinking (`∴`) and of what it wrote (`›`) | Its thinking as it streamed, with its size, the full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
 | **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
@@ -147,6 +147,7 @@ not installed.
 
 | Event | What Glass Box records |
 | --- | --- |
+| `prompt.submit` | Every message entering the session: where it came from (`origin`), the text a hook beneath changed it to, or why it was stopped |
 | `turn.start` / `turn.complete` | The prompt, the loop (main or subagent), duration, outcome, usage |
 | `turn.step` (streamed) | Model, effort, message count; then the text, tokens and stop reason. The stream's `tool` chunks carry the `tool_use_id`s that tie a step to its tool calls; its `thinking` chunks, the model's thinking |
 | `tool.check` | The permission verdict and what decided it |
