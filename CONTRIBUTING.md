@@ -81,6 +81,11 @@ view`), a blank line, then the why if it is not obvious.
 
 ## Releasing (maintainers)
 
+Until 1.0, work lands on `main` and is listed under **Unreleased** in
+`CHANGELOG.md`; there are no tagged releases in between. 1.0 is cut when the
+criteria in [ROADMAP.md](ROADMAP.md#10) are met. From then on, for each
+release:
+
 1. Move the **Unreleased** entries under a new version in `CHANGELOG.md`.
 2. Bump `version` in `.claude-plugin/plugin.json`.
 3. Tag the commit `vX.Y.Z` and publish a GitHub release with the changelog
