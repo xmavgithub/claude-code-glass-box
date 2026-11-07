@@ -2713,7 +2713,7 @@ export const register: Register = on => {
           {section('Reading the timeline')}
           {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running moves: a pulsing dot, two dots taking turns for a subagent at work, three dots for a model thinking.')}
           {term('g-s16', '⚠ APPROVAL ASKED', 'Claude Code asked you to allow a tool call: shown at the top of every tab, in strong colors. Until you answer the call waits; Claude Code does not say when you answer, so the mark stays until the call ends.')}
-          {term('g-s17', '▶ WORKING', 'a tool is running now: at the top of every tab and on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
+          {term('g-s17', '▶ WORKING', 'a tool is running now: at the top of the Timeline and on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
@@ -3330,11 +3330,13 @@ export const register: Register = on => {
       </Box>
     )
 
-    // What is going on now, above every tab: a call whose approval was asked
-    // of you, and the tools at work.
+    // What is going on now: a call whose approval was asked of you, above
+    // every tab, since Claude waits for you; the tools at work, on the
+    // Timeline alone.
     const running = callList.filter(c => c.status === 'running')
     const awaiting = running.filter(c => verdictKind(verdictById.get(c.id), c) === 'awaiting')
-    const working = running.filter(c => verdictKind(verdictById.get(c.id), c) !== 'awaiting')
+    const working =
+      current === 'timeline' ? running.filter(c => verdictKind(verdictById.get(c.id), c) !== 'awaiting') : []
     const nowRow = (c: ToolCall, asked: boolean) => (
       <Box key={`now-${c.id}`} flexDirection="row" alignItems="center" gap={1} {...fit(0)}>
         {asked ? pulse(`now-pulse-${c.id}`, ASK_SVG, 'approval asked', 12, 12) : pulse(`now-pulse-${c.id}`)}
@@ -3349,7 +3351,7 @@ export const register: Register = on => {
       </Box>
     )
     const approvalBanner =
-      running.length === 0 ? null : (
+      awaiting.length + working.length === 0 ? null : (
         <Box key="now" flexDirection="column" marginTop={1}>
           {awaiting.slice(0, 3).map(c => nowRow(c, true))}
           {awaiting.length > 0 && (

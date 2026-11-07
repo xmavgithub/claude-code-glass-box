@@ -59,10 +59,10 @@ everything below is on `main`. 1.0 will be released when the criteria in
 - **Newest first**: the steps in a turn, and a subagent's turns under its
   call, are listed newest first, as the turns are; the model and effort
   still show where they changed.
-- **What is going on now, impossible to miss**: at the top of every tab, in
-  reverse colors, a call whose approval was asked of you (`⚠ APPROVAL
-  ASKED`) and the tools at work (`▶ WORKING`), with the tool and its
-  argument; their rows are marked the same way. An ask counts as yours only
+- **What is going on now, impossible to miss**: at the top, in reverse
+  colors, a call whose approval was asked of you (`⚠ APPROVAL ASKED`) on
+  every tab, and the tools at work (`▶ WORKING`) on the Timeline, with the
+  tool and its argument; their rows are marked the same way. An ask counts as yours only
   when Claude Code put it to you (`classic.PermissionRequest`); one the
   permission mode settles without you, as auto mode does, shows as working.
 - **Animations** for what is running, in VS Code, the desktop app and
