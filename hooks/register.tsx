@@ -137,6 +137,9 @@ let injectionSeq = 0
 const composeSeen = new Map<string, string>()
 let contextSeen = ''
 const toolSeen = new Map<string, string>()
+// The arguments the model asked for, by call, to tell what a hook rewrote
+// once the call has run.
+const askedArgs = new Map<string, Record<string, unknown>>()
 
 const TABS: readonly { id: View; label: string; hotkey: string }[] = [
   { id: 'timeline', label: 'Timeline', hotkey: '1' },
@@ -654,6 +657,22 @@ async function flushTelemetry($: EngineInterface) {
 }
 
 /** Records a message between agents under the latest turn of its loop. */
+/**
+ * A call a hook rewrote: what ran (`tool_input` of PostToolUse) against what
+ * the model asked for. Only the arguments the model gave count: Claude Code
+ * may fill in defaults it never sent.
+ */
+async function recordRewrite($: EngineInterface, id: string, ran: unknown) {
+  const asked = askedArgs.get(id)
+  askedArgs.delete(id)
+  if (asked === undefined || typeof ran !== 'object' || ran === null) return
+  const after = ran as Record<string, unknown>
+  const changes = diffArgs(asked, Object.fromEntries(Object.keys(asked).filter(k => k in after).map(k => [k, after[k]])))
+  if (changes.length === 0) return
+  const record: Rewrite = { id, changes }
+  await update($, rewrites, list => [...list.filter(r => r.id !== record.id), record].slice(-MAX_CALLS))
+}
+
 async function post(
   $: EngineInterface,
   agentId: string | null,
@@ -793,6 +812,7 @@ export const register: Register = on => {
     contextSeen = ''
     toolSeen.clear()
     agentTypeSeen.clear()
+    askedArgs.clear()
     costAtStart.clear()
     telemetryBuffer = []
     telemetryAt = 0
@@ -1144,23 +1164,18 @@ export const register: Register = on => {
     }
   })
 
-  // What the settings hooks answered before a tool ran. Hooks modules sit above
-  // the settings hooks in this chain, so `next(e)` is their answer: a rewrite
-  // of the arguments (`updatedInput`) is recorded against the model's own.
-  on('classic.PreToolUse', async ($, e, next) => {
-    const answer = await next(e)
-    const updated = answer.updatedInput
-    if (updated !== undefined) {
-      const changes = diffArgs(argsOf(e), updated)
-      if (changes.length > 0) {
-        const record: Rewrite = { id: e.tool_use_id, changes }
-        await quietly(() =>
-          update($, rewrites, list => [...list.filter(r => r.id !== record.id), record].slice(-MAX_CALLS)),
-        )
-      }
-    }
+  // What a call ran with, once it has run: a hook that rewrote its arguments
+  // (a PreToolUse hook's updatedInput) shows here against the model's own.
+  // Read after the call, never in the permission check: Glass Box passes
+  // every event on unchanged.
+  on('classic.PostToolUse', async ($, e, next) => {
+    await quietly(() => recordRewrite($, e.tool_use_id, e.tool_input))
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
-    return answer
+  on('classic.PostToolUseFailure', async ($, e, next) => {
+    await quietly(() => recordRewrite($, e.tool_use_id, e.tool_input))
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // Everything Claude Code adds to what the model reads besides your message:
@@ -1527,6 +1542,8 @@ export const register: Register = on => {
 
   on('tool.call', async ($, e, next) => {
     const args = argsOf(e)
+    askedArgs.set(e.tool_use_id, args)
+    if (askedArgs.size > MAX_CALLS) askedArgs.delete(askedArgs.keys().next().value as string)
     const startedAt = await now($)
     const call: ToolCall = {
       id: e.tool_use_id,

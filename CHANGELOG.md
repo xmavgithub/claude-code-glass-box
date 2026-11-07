@@ -6,6 +6,23 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- An icon for the plugin listing (`.claude-plugin/icon.png`, drawn from
+  `docs/images/icon.svg`).
+- The README says what each hook does with what it sees: every event is
+  passed on unchanged, and Glass Box fetches nothing, runs nothing and reads
+  no credentials.
+
+### Changed
+
+- A call a hook rewrote is read from `classic.PostToolUse` (and
+  `classic.PostToolUseFailure`) once it has run, no longer from the
+  permission check (`classic.PreToolUse`), so Glass Box takes no part in any
+  permission decision. The `rewritten` mark now appears when the call ends.
+  Only the arguments the model gave are compared, so a default Claude Code
+  fills in is not counted as a rewrite.
+
 ### Fixed
 
 - A subagent's first turn that Claude Code starts with no text (a background

@@ -190,7 +190,7 @@ not installed.
 | `tool.describe` | Each tool offered to the model: who provides it, the size of its description, whether it waits behind ToolSearch |
 | `session.measure` | The context window's use, the session's cost and the rate-limit windows, as the status line gets them |
 | `session.compact` | Each compaction: what started it, tokens before and after, duration, or why it was skipped |
-| `classic.PreToolUse` | A settings hook's rewrite of a call's arguments, against the model's own |
+| `classic.PostToolUse` / `classic.PostToolUseFailure` | What a call ran with, once it has run: a hook's rewrite of its arguments, against the model's own |
 | `classic.PermissionRequest` | That an ask was put to you, not settled by the permission mode |
 | `model.complete` / `mcp.call` / `http.fetch` / `process.run` | Other plugins' calls through Claude Code: the plugin, the model and prompt size, the MCP tool, the method and URL (host and path only), the command; how each went and how long it took. Never headers, bodies, credentials or environments |
 | `telemetry.log` (collector) | The records Claude Code sends to the OpenTelemetry collector your operator configured: event and attributes |
@@ -204,6 +204,42 @@ not installed.
 | `tool.check` | The permission verdict and what decided it |
 | `tool.call` | Arguments, result text, error or deny, duration |
 | `agent.spawn` | A subagent starting: the call that started it (its `tool_use_id`), type, prompt, the model asked for and the one resolved, fork, background, teammate, workflow. Its `agentId` ties it to its turns |
+
+### What each hook does with what it sees
+
+Every hook passes its event on unchanged: Glass Box never allows, denies or
+asks for a tool call, never changes a setting, a message, a prompt, a tool
+description or a call, and never starts an agent or runs a command. It
+fetches nothing from the network, runs no process and calls no tool. The one
+thing it adds is its own pane and its `/glass-box` command. In detail:
+
+- **Permission checks** (`tool.check`, `classic.PermissionRequest`): it reads
+  the verdict and whether you were asked, and hands the check on as it came.
+  The decision stays with your settings, your hooks and you.
+- **Rewritten calls** (`classic.PostToolUse`, `classic.PostToolUseFailure`):
+  read after the call has run, to compare what ran with what the model asked
+  for. Nothing is changed.
+- **Settings, subagents and slash commands** (`config.set`, `agent.spawn`,
+  `command.run`): it records the change, the subagent or the command, and
+  passes the event on. It writes no settings and changes no agent's
+  permission mode.
+- **Other plugins' calls** (`model.complete`, `mcp.call`, `http.fetch`,
+  `process.run`): it records which plugin called what (the model and prompt
+  size, the MCP server and tool, the method with the URL's host and path, the
+  command line), how it went and how long it took. Never headers, bodies,
+  credentials or environments, and it does not change or block the call.
+- **Telemetry** (`telemetry.log` to your operator's collector): it keeps the
+  event name and its attributes in the pane only, clipped and with secrets
+  hidden. It sends nothing anywhere.
+- **What the model is told** (`prompt.compose`, `prompt.context`,
+  `prompt.attachment`, `prompt.submit`, `skill.prompt`, `tool.describe`,
+  `agent.offer`, `session.send`, `session.receive`): it reads the text as it
+  passes and returns it unchanged.
+- **Mods joining** (`plugin.register`): it records what each mod hooks and
+  calls, as the engine scanned it, and refuses none.
+- **Credentials**: it reads none. The only setting it reads is
+  `advisorModel`, to name the advisor's model. The patterns in its code that
+  name keys and tokens are there to hide secrets from the pane.
 
 ## Privacy
 

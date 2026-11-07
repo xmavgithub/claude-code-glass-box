@@ -345,12 +345,19 @@ test('the advisor shows as its own row: time, model, and its advice read from th
 })
 
 test('a call a PreToolUse hook rewrote shows what the model asked for and what ran', async ($, on) => {
-  // Stands for a settings hook such as one that prefixes commands.
-  on('classic.PreToolUse', (_, e) =>
-    e.tool === 'Bash' ? { updatedInput: { command: `rtk ${e.command}` } } : {},
-  )
   on('tool.call', () => ({ result: {}, text: 'clean' }))
+  on('classic.PostToolUse', () => ({}))
+  // The model asks for `git status`; a settings hook (one that prefixes
+  // commands, say) rewrote it, and PostToolUse carries what ran. A default
+  // Claude Code fills in (timeout) is not a rewrite.
   await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'toolu_r' })
+  await $.classic.PostToolUse({
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'rtk git status', timeout: 120000 },
+    tool_response: {},
+    tool_use_id: 'toolu_r',
+  } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(has(await texts(ui), /^✓ Bash .* {2}rewritten {2}git status → rtk git status$/)).toBe(true)
