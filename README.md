@@ -14,6 +14,8 @@ how many tokens it used.
 It is the opposite of a black box: a way to review, debug and learn from an
 agent's process instead of trusting only its final answer.
 
+![Glass Box at work: a turn starts, its steps appear, three subagents work in parallel (their Agent calls marked WORKING), then the turn closes with each subagent nested under the call that started it](docs/images/demo.gif)
+
 > Glass Box is a mod: it needs a Claude Code version with mods (function
 > hooks), a feature in early access. It is built and tested with Claude Code
 > 2.1.318. See [Install](#install).

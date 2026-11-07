@@ -145,7 +145,8 @@ operations on `$`) against what Glass Box records. In order of value:
 - [ ] Export a session's trace as Markdown or JSON, to share or attach to a
   bug report.
 - [ ] Translations, Italian first, once the wording is stable.
-- [ ] Screenshots and a short video in the README.
+- [x] A short demo in the README.
+- [ ] Screenshots of each tab in the README.
 - [ ] Submission to the Claude Code plugin directory.
 
 ## 1.0
