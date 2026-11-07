@@ -14,6 +14,10 @@ how many tokens it used.
 It is the opposite of a black box: a way to review, debug and learn from an
 agent's process instead of trusting only its final answer.
 
+> Glass Box is a mod: it needs a Claude Code version with mods (function
+> hooks), a feature in early access. It is built and tested with Claude Code
+> 2.1.318. See [Install](#install).
+
 ```text
 2 turns · 3 steps · 3 tool calls · 1 failed  ●
 
