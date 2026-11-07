@@ -783,6 +783,24 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // A /clear (or a resume) ends the session and goes on under a new id, with
+  // a fresh state and no session.start: forget what was last written, or the
+  // system prompt, the tools and the agent types offered would not be
+  // recorded again in the new one.
+  on('session.end', async ($, e, next) => {
+    const answer = await next(e)
+    composeSeen.clear()
+    contextSeen = ''
+    toolSeen.clear()
+    agentTypeSeen.clear()
+    costAtStart.clear()
+    telemetryBuffer = []
+    telemetryAt = 0
+    lastBreakdownAt = 0
+
+    return answer
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'glass-box' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS })
 

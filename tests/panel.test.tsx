@@ -1181,3 +1181,24 @@ test('secrets are hidden before they are stored: in the row, the input, the outp
   expect(written.some(w => w.includes(KEY) || w.includes(TOKEN))).toBe(false)
   await ui.unmount()
 })
+
+test('after a /clear the new session records the tools offered again', async ($, on) => {
+  on('tool.describe', (_, e) => ({ description: e.description }))
+  on('session.end', () => ({ sessionId: 'S2' }))
+  const toolWrites: number[] = []
+  on('state.set', async ($, e, next) => {
+    if (e.key === 'tools') toolWrites.push(1)
+    return next(e)
+  })
+  const describe = () =>
+    $.tool.describe({ tool: 'Bash', description: 'Runs a shell command.', provider: { plugin: 'engine', tier: 'core' } } as never)
+
+  await describe()
+  await describe()
+  // Unchanged: written once.
+  expect(toolWrites.length).toBe(1)
+  // A /clear: the session ends and goes on under a new id with a fresh state.
+  await $.session.end({ reason: 'clear', sessionId: 'S1', resume: {} } as never)
+  await describe()
+  expect(toolWrites.length).toBe(2)
+})

@@ -158,6 +158,9 @@ everything below is on `main`. 1.0 will be released when the criteria in
   `[hidden]` and keeps no copy. Matching patterns, not a guarantee.
 - A step interrupted with Esc closes as "no response" instead of staying
   "running".
+- After a `/clear` the new session records the system prompt, the tools and
+  the agent types offered again: Glass Box no longer keeps, from the session
+  that ended, the memory of what it had already written.
 - State is bounded (turns, calls, context items, skills) and long texts are
   clipped.
 
