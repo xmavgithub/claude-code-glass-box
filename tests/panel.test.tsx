@@ -1016,17 +1016,26 @@ test('Stats shows what was sent to the operator’s telemetry collector, and say
 })
 
 
-test('a call waiting for approval is loud on every tab, and a thinking step says so while it runs', async ($, on) => {
+test('an approval asked of you and a tool at work are loud on every tab, and a thinking step says so while it runs', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 500) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.step', async function* (_, e) {
-    if (e.index === 0) yield { kind: 'tool', index: 0, id: 'toolu_W', name: 'Bash' } as const
+    if (e.index === 0) {
+      yield { kind: 'tool', index: 0, id: 'toolu_W', name: 'Bash' } as const
+      yield { kind: 'tool', index: 1, id: 'toolu_L', name: 'Bash' } as const
+    }
     if (e.index === 1) yield { kind: 'thinking', index: 0, text: '' } as const
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: USAGE } as const
   })
-  on('tool.check', () => ({ decision: 'ask' }) as const)
-  on('tool.call', () => ({ result: {}, text: 'pushed' }))
+  on('tool.check', (_, e) => ({ decision: e.tool_use_id === 'toolu_L' ? 'allow' : 'ask' }) as const)
+  // A long command: it works until the test lets it end.
+  let finish = () => {}
+  const done = new Promise<void>(resolve => (finish = resolve))
+  on('tool.call', async (_, e) => {
+    if (e.tool_use_id === 'toolu_L') await done
+    return { result: {}, text: 'ok' }
+  })
   // The ask waits for an answer, as it waits for you: here, until the test
   // lets it go.
   let release = () => {}
@@ -1042,21 +1051,28 @@ test('a call waiting for approval is loud on every tab, and a thinking step says
   }
   await $.tool.check({ tool: 'Bash', input: { command: 'git push' }, tool_use_id: 'toolu_W' } as never)
   const call = $.tool.call({ tool: 'Bash', command: 'git push', tool_use_id: 'toolu_W' })
+  await $.tool.check({ tool: 'Bash', input: { command: 'npm test' }, tool_use_id: 'toolu_L' } as never)
+  const long = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'toolu_L' })
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     for (const view of ['v:timeline', 'v:stats']) {
       await ui.press({ key: view })
       const all = await texts(ui)
-      expect(has(all, /^(?: )?⚠ WAITING FOR YOUR APPROVAL  Bash  git push$/)).toBe(true)
+      expect(has(all, /^ ⚠ APPROVAL ASKED  Bash  git push$/)).toBe(true)
+      expect(has(all, /^ ▶ WORKING  Bash  npm test$/)).toBe(true)
     }
     await ui.press({ key: 'v:timeline' })
-    expect(has(await texts(ui), /⚠ AWAITING YOUR APPROVAL/)).toBe(true)
+    const rows = await texts(ui)
+    expect(has(rows, /^(?:● | )?Bash .*⚠ APPROVAL ASKED .*git push$/)).toBe(true)
+    expect(has(rows, /^(?:● | )?Bash .* WORKING .*npm test$/)).toBe(true)
     if (surface !== 'terminal') expect(await ui.find({ type: 'Svg' })).toBeDefined()
     await ui.unmount()
   }
   release()
   await call
+  finish()
+  await long
 
   // A step that streams its thinking: ∴ thinking while it runs.
   const step = $.turn.step({ turnId: 'T1', index: 1, model: 'claude-opus-5-5', messageCount: 3 })

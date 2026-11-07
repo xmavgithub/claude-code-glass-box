@@ -37,9 +37,13 @@ Click a `▸` to open a turn or a step (or give the pane the keyboard, then use
 Tab and Enter). An open step shows its full text, its token breakdown and,
 under each of its tool calls, the call's input, output and permission verdict.
 
-A tool call waiting for your approval is shown at the top of every tab, in
-reverse colors (`⚠ WAITING FOR YOUR APPROVAL`), and marked the same way on
-its row, until you answer.
+What is going on now is shown at the top of every tab, in reverse colors: a
+tool call whose approval Claude Code asked of you (`⚠ APPROVAL ASKED`), and
+the tools at work (`▶ WORKING`); their rows are marked the same way. An ask
+counts as yours only when Claude Code put it to you (it raised a
+`PermissionRequest`); one the permission mode settles without you, as auto
+mode's classifier does, shows as working. Claude Code says when it asks you,
+not when you answer: an approved call stays marked until it ends.
 
 Status marks: `●` running, `✓` done, `✗` failed, `⊘` denied. In VS Code and
 the desktop app what is running moves (a pulsing dot; two dots for a subagent

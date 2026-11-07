@@ -478,6 +478,10 @@ export type Verdict = {
   plugin: string | null
   /** Who answers an ask: 'person', 'host', or nobody. */
   approver: string | null
+  /** True once Claude Code put the ask to a person (a PermissionRequest was raised for it). */
+  askedYou: boolean
+  /** The permission mode at that ask (default, plan…); null when none was put to you. */
+  mode: string | null
 }
 
 declare module 'claude-code' {

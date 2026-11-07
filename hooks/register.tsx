@@ -62,7 +62,7 @@ const turns = atom({ plugin: 'glass-box', key: 'turns' } as const, [], { shape: 
 const steps = atom({ plugin: 'glass-box', key: 'steps' } as const, [], { shape: 'steps-4' })
 const calls = atom({ plugin: 'glass-box', key: 'calls' } as const, [], { shape: 'calls-2' })
 const verdicts = atom({ plugin: 'glass-box', key: 'verdicts' } as const, [], {
-  shape: 'verdicts-1',
+  shape: 'verdicts-2',
 })
 const toggled = atom({ plugin: 'glass-box', key: 'toggled' } as const, [], {
   shape: 'toggled-1',
@@ -410,13 +410,20 @@ const modelLabel = (step: Step) =>
   `${shortModel(step.model)}${step.effort !== null ? ` · ${step.effort} effort` : ''}`
 
 /** What the permission check on a call came to. */
-type VerdictKind = 'rule' | 'hook' | 'allowed' | 'approved' | 'rejected' | 'awaiting' | 'denied' | 'none'
+type VerdictKind = 'rule' | 'hook' | 'allowed' | 'approved' | 'rejected' | 'awaiting' | 'deciding' | 'denied' | 'none'
+
+/**
+ * Whether an ask was put to you: Claude Code raised a PermissionRequest for
+ * it. Otherwise the mode (the auto classifier, say) or the host settled it.
+ * Claude Code says when it asks you, not when you answer.
+ */
+const asksYou = (v: Verdict) => v.askedYou
 
 function verdictKind(v: Verdict | undefined, call: ToolCall): VerdictKind {
   if (v === undefined) return 'none'
   if (v.decision === 'deny') return 'denied'
   if (v.decision === 'ask') {
-    if (call.status === 'running') return 'awaiting'
+    if (call.status === 'running') return asksYou(v) ? 'awaiting' : 'deciding'
     // A refused ask reaches the model as an error result, not as a deny.
     const refused = /^Permission to use .+ (has been|was) denied/.test(call.output)
     return call.status === 'denied' || refused ? 'rejected' : 'approved'
@@ -436,7 +443,9 @@ function verdictOutcome(v: Verdict | undefined, call: ToolCall): { label: string
     case 'denied':
       return { label: v?.rule != null ? `denied · ${v.rule}` : 'denied', color: 'error' }
     case 'awaiting':
-      return { label: 'awaiting approval', color: 'warning' }
+      return { label: 'approval asked', color: 'warning' }
+    case 'deciding':
+      return { label: v?.approver === 'host' ? 'asked · the host decides' : 'asked · decided without you' }
     case 'rejected':
       return { label: 'rejected', color: 'error' }
     case 'rule':
@@ -464,11 +473,15 @@ function explainVerdict(v: Verdict | undefined, call: ToolCall): string {
         ? `Allowed without asking: ${v.reason}`
         : 'Allowed without asking, by the permission mode or because the tool only reads.'
     case 'approved':
-      return `Claude Code asked for approval${why}, and the call was approved: by you, or automatically in auto mode.`
+      return v !== undefined && !asksYou(v)
+        ? `Claude Code asked${why}, and ${v.approver === 'host' ? 'the host' : 'the permission mode (the auto mode classifier, say)'} approved the call, without asking you.`
+        : `Claude Code asked for your approval${why}, and the call was approved.`
     case 'rejected':
       return `Claude Code asked for approval${why}, and the call was rejected. The model was told it could not run.`
     case 'awaiting':
-      return `Waiting for approval${why}.`
+      return `Claude Code asked for your approval${why}. Until you answer, the call waits; once you approve, it runs. Claude Code does not tell Glass Box when you answer, so this stays marked until the call ends.`
+    case 'deciding':
+      return `Claude Code asked${why}, but not you: ${v?.approver === 'host' ? 'the host decides' : 'the permission mode decides (the auto mode classifier, say)'}. The call runs once it is allowed.`
     case 'denied': {
       const by = v?.rule != null ? ` by the rule ${v.rule} in your settings` : v?.hook != null ? ` by a ${v.hook} hook` : ''
       return `Denied${by}${why}. The tool did not run; the model was told why.`
@@ -1399,6 +1412,26 @@ export const register: Register = on => {
     return answer
   }).catch(($, e, next) => next(e))
 
+  // An ask put to a person: raised when Claude Code is about to ask you (the
+  // dialog), not when the mode's classifier or a host settles it. It names no
+  // tool_use_id: it is matched to the oldest call of its tool and loop that
+  // runs with an ask nobody was asked about yet. Recorded before `next`, as
+  // the answer may come only once you give it.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    await quietly(async () => {
+      const agentId = e.agent_id ?? null
+      const [callList, verdictList] = await Promise.all([read($, calls), read($, verdicts)])
+      const pending = new Map(verdictList.filter(v => v.decision === 'ask' && !v.askedYou).map(v => [v.id, v]))
+      const call = callList.find(c => c.status === 'running' && c.tool === e.tool_name && c.agentId === agentId && pending.has(c.id))
+      if (call === undefined) return
+      await update($, verdicts, list =>
+        list.map(v => (v.id === call.id ? { ...v, askedYou: true, mode: e.permission_mode ?? null } : v)),
+      )
+    })
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   // The permission verdict: which rule, hook, setting or plugin decided.
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
@@ -1413,6 +1446,8 @@ export const register: Register = on => {
         setting: verdict.setting ?? null,
         plugin: verdict.plugin ?? null,
         approver: e.approver ?? null,
+        askedYou: false,
+        mode: null,
       }
       await quietly(() =>
         update($, verdicts, list => [...list.filter(v => v.id !== id), record].slice(-MAX_CALLS)),
@@ -1694,12 +1729,15 @@ export const register: Register = on => {
             { text: ` ${name}`, bold: true },
             server !== null && { text: ` ·${server}`, dim: true },
             showAgent && call.agentId !== null && { text: ' [subagent]', color: 'subtle' },
-            { text: `  ${formatDuration(call.durationMs)}`, dim: true },
+            // While it runs (and is not waiting for you): WORKING, plain to see.
+            ...(call.status === 'running' && verdictKind(verdictById.get(call.id), call) !== 'awaiting'
+              ? [{ text: '  ' }, { text: ' WORKING ', color: 'suggestion', bold: true, inverse: true }]
+              : [{ text: `  ${formatDuration(call.durationMs)}`, dim: true }]),
             outcome !== null &&
               (outcome.color === undefined
                 ? { text: `  ${outcome.label}`, dim: true }
-                : outcome.label === 'awaiting approval'
-                  ? { text: `  ⚠ AWAITING YOUR APPROVAL `, color: 'warning', bold: true, inverse: true }
+                : outcome.label === 'approval asked'
+                  ? { text: '  ⚠ APPROVAL ASKED ', color: 'warning', bold: true, inverse: true }
                   : { text: `  ${outcome.label}`, color: outcome.color }),
             rewrite !== undefined && { text: '  rewritten', color: 'suggestion' },
             summary !== '' && { text: `  ${summary}` },
@@ -2445,7 +2483,8 @@ export const register: Register = on => {
         allowed: 'allowed by the mode or the tool',
         approved: 'asked, then approved',
         rejected: 'asked, then rejected',
-        awaiting: 'awaiting approval',
+        awaiting: 'approval asked of you',
+        deciding: 'asked, decided without you',
         denied: 'denied',
         none: 'no verdict recorded',
       }
@@ -2623,7 +2662,8 @@ export const register: Register = on => {
 
           {section('Reading the timeline')}
           {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running moves: a pulsing dot, two dots taking turns for a subagent at work, three dots for a model thinking.')}
-          {term('g-s16', '⚠ WAITING FOR YOUR APPROVAL', 'a tool call waits for you to allow it: shown at the top of every tab, in strong colors, until you answer. The session does nothing else meanwhile.')}
+          {term('g-s16', '⚠ APPROVAL ASKED', 'Claude Code asked you to allow a tool call: shown at the top of every tab, in strong colors. Until you answer the call waits; Claude Code does not say when you answer, so the mark stays until the call ends.')}
+          {term('g-s17', '▶ WORKING', 'a tool is running now: at the top of every tab and on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
@@ -3239,27 +3279,39 @@ export const register: Register = on => {
       </Box>
     )
 
-    // A call that waits for your approval, shown above every tab: it is what
-    // the session is stuck on until you answer.
-    const awaiting = callList.filter(c => c.status === 'running' && verdictKind(verdictById.get(c.id), c) === 'awaiting')
+    // What is going on now, above every tab: a call whose approval was asked
+    // of you, and the tools at work.
+    const running = callList.filter(c => c.status === 'running')
+    const awaiting = running.filter(c => verdictKind(verdictById.get(c.id), c) === 'awaiting')
+    const working = running.filter(c => verdictKind(verdictById.get(c.id), c) !== 'awaiting')
+    const nowRow = (c: ToolCall, asked: boolean) => (
+      <Box key={`now-${c.id}`} flexDirection="row" alignItems="center" gap={1} {...fit(0)}>
+        {asked ? pulse(`now-pulse-${c.id}`, ASK_SVG, 'approval asked', 12, 12) : pulse(`now-pulse-${c.id}`)}
+        {seg(room(4), [
+          asked
+            ? { text: ' ⚠ APPROVAL ASKED ', color: 'warning', bold: true, inverse: true }
+            : { text: ' ▶ WORKING ', color: 'suggestion', bold: true, inverse: true },
+          { text: ` ${toolName(c.tool).name}`, bold: true },
+          c.agentId !== null && { text: ' [subagent]', color: 'subtle' },
+          c.summary !== '' && { text: `  ${tidy(c.summary)}` },
+        ])}
+      </Box>
+    )
     const approvalBanner =
-      awaiting.length === 0 ? null : (
-        <Box key="approval" flexDirection="column" marginTop={1}>
-          {awaiting.slice(0, 3).map(c => (
-            <Box key={`approval-${c.id}`} flexDirection="row" alignItems="center" gap={1} {...fit(0)}>
-              {pulse(`approval-pulse-${c.id}`, ASK_SVG, 'awaiting your approval', 12, 12)}
-              {seg(room(4), [
-                { text: ' ⚠ WAITING FOR YOUR APPROVAL ', color: 'warning', bold: true, inverse: true },
-                { text: ` ${toolName(c.tool).name}`, bold: true },
-                c.summary !== '' && { text: `  ${tidy(c.summary)}` },
-              ])}
+      running.length === 0 ? null : (
+        <Box key="now" flexDirection="column" marginTop={1}>
+          {awaiting.slice(0, 3).map(c => nowRow(c, true))}
+          {awaiting.length > 0 && (
+            <Box paddingLeft={2} {...fit(2)}>
+              <Text color="warning" wrap="wrap">
+                Claude Code asked for your approval: until you answer, the call waits. Once you approve it works, but Claude Code does not say when you answered, so this stays until the call ends.
+              </Text>
             </Box>
-          ))}
-          {awaiting.length > 3 && (
-            <Text color="warning" bold>
-              {`and ${awaiting.length - 3} more`}
-            </Text>
           )}
+          {working.slice(0, 3).map(c => nowRow(c, false))}
+          {awaiting.length + working.length > 6 || working.length > 3 ? (
+            <Text dimColor>{`and ${Math.max(0, working.length - 3)} more at work`}</Text>
+          ) : null}
         </Box>
       )
 
