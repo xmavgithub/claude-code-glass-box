@@ -141,6 +141,10 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 #### Clarity
 
+- The Guide explains the verdict words on a call's row (allowed, rule, hook,
+  approved, rejected, denied, approval asked, decided without you) and says
+  that Claude Code never tells when you answer an approval; the README lists
+  every event Glass Box hooks, with a Timeline example as the pane draws it.
 - Plain words everywhere, no abbreviations; color kept for what needs
   attention, routine details dim.
 - Paths relative to the project, home as `~`; MCP tools by their own name and

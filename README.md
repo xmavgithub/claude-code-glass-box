@@ -15,21 +15,21 @@ It is the opposite of a black box: a way to review, debug and learn from an
 agent's process instead of trusting only its final answer.
 
 ```text
-3 turns · 9 steps · 14 tool calls · 1 failed
+2 turns · 3 steps · 3 tool calls · 1 failed  ●
 
-▾ ● Turn · 14:02 · 2 steps · 4 tools · ctx 42.2k · running
+▾ ● Turn · 14:02 · 2 steps · 3 tool calls · context 42.2k · running
   “add a license and push the repo”
 
   ▸ ● Step 2 · running
 
-  ▸ ✓ Step 1 · opus-5-5 high · 3.1s · out 340 · → tools
+  ▾ ✓ Step 1 · opus-5-5 · high effort · 3.1s · wrote 340 tokens · asked for 3 tools
+    ∴ Check the repo state before adding anything.
     › I'll check the repository state first.
-    ✓ Bash  412ms  Bash(git:*)  git status
+    ✓ Bash  412ms  allowed: rule Bash(git:*)  git status
     ✓ Read  9ms  allowed  LICENSE
-    ✓ scan_secrets ·plugin-authoring  96ms  ~/project
     ⊘ Write  3ms  denied · Write(/etc/**)  /etc/hosts
 
-▸ ✓ Turn · 13:58 · 2 steps · 3 tools · ctx 40.1k · 9.7s
+▸ ✓ Turn · 13:58 · 1 step · 0 tool calls · context 40.1k · 9.7s
   “run the tests”
 ```
 
@@ -42,11 +42,10 @@ every tab, in reverse colors (`⚠ APPROVAL ASKED`), since Claude waits for
 you; its row is marked the same way. A tool at work is marked `WORKING` on
 its row, and on the Timeline a dot of the same color follows the counts, on
 a line that is always there, so the timeline below does not move as calls
-come and go. An ask
-counts as yours only when Claude Code put it to you (it raised a
-`PermissionRequest`); one the permission mode settles without you, as auto
-mode's classifier does, shows as working. Claude Code says when it asks you,
-not when you answer: an approved call stays marked until it ends.
+come and go. An ask counts as yours only when Claude Code put it to you (it
+raised a `PermissionRequest`); one the permission mode settles without you,
+as auto mode's classifier does, shows as working. Claude Code says when it
+asks you, not when you answer: an approved call stays marked until it ends.
 
 Status marks: `●` running, `✓` done, `✗` failed, `⊘` denied. In VS Code and
 the desktop app what is running moves (a pulsing dot; two dots for a subagent
@@ -106,7 +105,7 @@ beside the session's counts, a **Guide** button (`g`):
 - **Guide**: the loop above, what each tab holds, a legend of every mark the
   Timeline draws, and a glossary (token, context, cache, effort, thinking,
   permission rule, hook, auto mode, subagent, messages between agents, mod,
-  telemetry, MCP tool, system prompt, skill, ToolSearch, compaction, rate
+  telemetry, MCP tool, system prompt, instruction files, skill, ToolSearch, compaction, rate
   limits, added context, rewritten call, server tool).
 
 In the Timeline:
@@ -120,8 +119,9 @@ In the Timeline:
 | **Setting** | A row of its own: the `/config` row, its value before and after, who changed it, or that a plugin refused the change and why | |
 | **Messages between agents** | One line under the turn: how many messages its loop sent and received, and how many did not get through | Each message: to or from whom (an agent, a teammate, another session, a relay, an external event), who sent it (the model or a plugin), whether it was delivered or why not, whether a plugin took or changed it, and its text |
 | **Server tool** | One line: the tool the API ran inside the step (the advisor, say), its duration, and its model: the one the result names, else the `advisorModel` your settings name | Under its open step: its input and its result as the transcript keeps it |
+| **Compaction** | A `⇣` line under the turn it happened in: the context compacted (or a compaction skipped, and why), what started it (you, Claude Code as the context filled, a plugin), tokens before and after, duration | |
 | **Subagent** | Under the Agent call that started it: its type, the model it runs on, steps, tool calls, duration, cost, and whether it is a fork, runs in the background, is a teammate or a workflow's agent. Open while it works | What kind of agent it is, the model the call asked for, the permission mode it inherits, the prompt it was given, and its own turns, steps and tool calls (and the subagents it starts, nested again) |
-| **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
+| **Tool call** | One line: status, tool, duration (`WORKING` while it runs), what the permission check came to (`allowed`, `allowed: rule …`, `allowed: hook`, `approved`, `rejected`, `denied`; while it runs, `approval asked`, or `asked · decided without you` when the mode settles it, `asked · the host decides` in a hosted session), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
 The newest turn is open; older turns fold away. Turns, and the steps in a
 turn, are listed newest first. A header line counts turns, steps, tool calls
@@ -174,6 +174,18 @@ not installed.
 
 | Event | What Glass Box records |
 | --- | --- |
+| `session.start` | Opens the pane and registers `/glass-box`; the working directory, to show paths relative to it |
+| `session.end` | Nothing shown: after a `/clear` (a new session with a fresh state, and no `session.start`) Glass Box forgets what it had already recorded, so the new session is recorded in full |
+| `ui.render` (Pane) | Draws the pane |
+| `prompt.compose` | The system prompt, section by section: shared or yours, size, text, and whether it was sent or only measured |
+| `prompt.context` | The blocks in front of the conversation's first message, and the instruction files (CLAUDE.md and what they import) |
+| `prompt.attachment` | What Claude Code adds to the model's reading besides your message: reminders, listings, mentioned files, hooks' and plugins' output; its source, kind and size |
+| `skill.prompt` | Each skill loaded: its name, source, plugin and text |
+| `tool.describe` | Each tool offered to the model: who provides it, the size of its description, whether it waits behind ToolSearch |
+| `session.measure` | The context window's use, the session's cost and the rate-limit windows, as the status line gets them |
+| `session.compact` | Each compaction: what started it, tokens before and after, duration, or why it was skipped |
+| `classic.PreToolUse` | A settings hook's rewrite of a call's arguments, against the model's own |
+| `classic.PermissionRequest` | That an ask was put to you, not settled by the permission mode |
 | `model.complete` / `mcp.call` / `http.fetch` / `process.run` | Other plugins' calls through Claude Code: the plugin, the model and prompt size, the MCP tool, the method and URL (host and path only), the command; how each went and how long it took. Never headers, bodies, credentials or environments |
 | `telemetry.log` (collector) | The records Claude Code sends to the OpenTelemetry collector your operator configured: event and attributes |
 | `command.run` / `config.set` | Slash commands that ran, with their output and notes for the model; `/config` changes, before and after, or why refused |
@@ -241,7 +253,7 @@ What it leaves out, and why:
 | The prompt box: `prompt.fill`, `prompt.suggest`, `prompt.edit`, `prompt.change`, `prompt.autocomplete` | Typing before you send; what you send is shown (`prompt.submit`) |
 | `prompt.section`, `prompt.mention` | Covered: `prompt.compose` shows every section of the system prompt, `prompt.attachment` every mentioned file as the model reads it |
 | `command.describe`, `config.describe` | How commands and settings are listed; what ran and what changed is shown |
-| `engine.create`, `session.end`, `session.attach`, `session.detach` | The engine's and the surfaces' lifecycle; at the session's end there is no pane left to show it in |
+| `engine.create`, `session.attach`, `session.detach` | The engine's and the surfaces' lifecycle, not what the agent does. `session.end` is hooked only to start afresh after a `/clear` |
 | `attribution.text` | The attribution line the model is asked to put in a commit or pull request: of little use to show |
 | `telemetry.log` to Anthropic, `telemetry.mark` | Open to the CLI's built-in plugins only: a mod's hook on them does not load. What goes to your operator's collector is shown |
 | Mods loaded before Glass Box, and their calls through `$` | The engine tells a mod only of the mods loaded after it, and only a hook above a caller sees its calls. They show by what they do in the open: tools, skills, agent types, permission checks |

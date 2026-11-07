@@ -280,10 +280,12 @@ test('the Guide explains the loop with the numbers of the last turn, the tabs an
   expect(all).toContain('Your last turn: 1 step, 0 tool calls, 340 tokens written, 2.5s.')
   // The tabs, and every mark the Timeline draws, are explained.
   expect(all).toContain('The tabs')
-  for (const mark of ['∴ text', 'rewritten', 'Subagent', 'Turn titles', '✎', '↳', '+', '✉', '⇣', '/ and ⚙', '⊘ blocked', '[hidden]', 'Mod.', 'Telemetry.']) {
+  for (const mark of ['∴ text', 'rewritten', 'Subagent', 'Turn titles', '✎', '↳', '+', '✉', '⇣', '/ and ⚙', '⊘ blocked', '[hidden]', 'Verdicts', 'Mod.', 'Telemetry.']) {
     expect(has(all, new RegExp(`^${mark.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`))).toBe(true)
   }
   expect(has(all, /^Context\. Everything the model reads at a step/)).toBe(true)
+  // The limits say what Claude Code never tells a mod.
+  expect(has(all, /when you answer an approval/)).toBe(true)
   await ui.unmount()
 })
 

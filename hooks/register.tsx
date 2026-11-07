@@ -2735,6 +2735,7 @@ export const register: Register = on => {
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
+          {term('g-s19', 'Verdicts', 'on a call’s row, what the permission check came to. allowed: no rule asked for you (allowed: rule Bash(git:*) names the settings rule, allowed: hook a hook). approved and rejected: you, or whoever was asked, answered an ask. denied: a rule or hook refused it. While a call runs, approval asked means you were asked; asked · decided without you, that the permission mode settles it (auto mode, say); asked · the host decides, the program hosting the session.')}
           {term('g-s6', 'rewritten', 'a hook changed the call’s arguments before it ran: open its step for both versions.')}
           {term('g-s7', 'Subagent', 'under an Agent call, the helper it started: its type, model, steps and tool calls; open it for the prompt it was given and its own turns.')}
           {term('g-s8', 'Turn titles', 'a turn you did not type is named by its sender: Report from subagent…, Background task ended, Message from another session, Prompt from plugin…')}
@@ -2773,7 +2774,7 @@ export const register: Register = on => {
           {term('g-w10', 'Server tool.', 'A tool the model API runs itself inside a step, such as the advisor: a second model the main one consults for a review or a plan. Claude Code runs nothing for it, so there is no permission check. Glass Box shows when it ran, how long it took, the model your settings name for the advisor, and its result as the transcript keeps it.')}
 
           {section('What Glass Box cannot see')}
-          {para('g-limits', 'The model’s reasoning beyond what it sends; how a server tool worked inside (only its input and result reach the transcript); Anthropic’s own telemetry, which only the CLI’s built-in plugins may watch; mods loaded before Glass Box, seen only by what they do; and anything before Glass Box loaded. The README lists every event it leaves out, and why. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
+          {para('g-limits', 'The model’s reasoning beyond what it sends; how a server tool worked inside (only its input and result reach the transcript); when you answer an approval (Claude Code says when it asks you, not when you answer); Anthropic’s own telemetry, which only the CLI’s built-in plugins may watch; mods loaded before Glass Box, seen only by what they do; and anything before Glass Box loaded. The README lists every event it leaves out, and why. It only observes: it never changes, delays or blocks what Claude Code does.', true)}
         </Box>
       )
     }
