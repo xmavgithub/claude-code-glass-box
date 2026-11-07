@@ -2174,9 +2174,16 @@ export const register: Register = on => {
               : by.title
       const notYou = from !== null || byTitle !== null
       const during = blocked !== undefined ? [] : messageList.filter(m => m.during === turn.id && m.startedTurn === null && m.dropped === null)
+      // A subagent's first turn may come with no text (a background one, say):
+      // its prompt is the one its Agent call gave it, drawn just above.
+      const noPrompt = turn.prompt === ''
+      const firstOfAgent =
+        turn.agentId !== null && !allTurns.some(t => t.agentId === turn.agentId && t.startedAt < turn.startedAt)
       const prompt =
-        turn.prompt === ''
-          ? '(no prompt: a continuation, or started before Glass Box loaded)'
+        noPrompt
+          ? nested && firstOfAgent
+            ? 'Started from the prompt it was given, shown above.'
+            : '(no prompt: a continuation, or started before Glass Box loaded)'
           : from !== null
             ? turn.prompt
             : notYou
@@ -2226,7 +2233,7 @@ export const register: Register = on => {
             </Box>
           </Box>
           <Box paddingLeft={2} {...fit(2)}>
-            <Text color={notYou ? undefined : 'claude'} wrap={open ? 'wrap' : 'truncate-end'}>
+            <Text color={notYou || noPrompt ? undefined : 'claude'} dimColor={noPrompt} wrap={open ? 'wrap' : 'truncate-end'}>
               {open ? prompt : cut(prompt, room(2))}
             </Text>
           </Box>

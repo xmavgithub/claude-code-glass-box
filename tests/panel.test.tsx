@@ -1204,3 +1204,41 @@ test('after a /clear the new session records the tools offered again', async ($,
   await describe()
   expect(toolWrites.length).toBe(2)
 })
+
+test('a subagent’s first turn that comes with no text points to the prompt it was given', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    if (e.turnId === 'T1') yield { kind: 'tool', index: 0, id: 'toolu_B', name: 'Agent' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+  })
+  on('tool.call', () => ({ result: {}, text: 'launched' }))
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'B1' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+
+  await $.turn.start({ turnId: 'T1', text: 'delegate' })
+  for await (const _chunk of $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // drain
+  }
+  await $.tool.call({ tool: 'Agent', description: 'look', prompt: 'Look around.', tool_use_id: 'toolu_B' } as never)
+  await $.agent.spawn({
+    tool_use_id: 'toolu_B',
+    prompt: 'Look around.',
+    description: 'look',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+  } as never)
+  // A background subagent's turn, as Claude Code raises it: no text.
+  await $.turn.start({ turnId: 'S1', text: '', agentId: 'B1' } as never)
+
+  // A subagent at work is drawn open.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const all = await texts(ui)
+  expect(all).toContain('Started from the prompt it was given, shown above.')
+  expect(has(all, /no prompt: a continuation/)).toBe(false)
+  await ui.unmount()
+})

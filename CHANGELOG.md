@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A subagent's first turn that Claude Code starts with no text (a background
+  subagent's) points to the prompt its Agent call gave it, drawn just above,
+  instead of saying in your messages' color that it has no prompt.
+
 ## [1.0.0] - 2026-11-07
 
 The first release: it meets the 1.0 criteria in [ROADMAP.md](ROADMAP.md#10).
