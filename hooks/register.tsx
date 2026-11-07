@@ -2579,10 +2579,27 @@ export const register: Register = on => {
           {term('g-5', '5. Again.', 'With the results, Claude Code starts a new step. The turn ends when a step answers without asking for tools.')}
           {para('g-example', example, true)}
 
+          {section('The tabs')}
+          {term('g-t1', 'Timeline', 'every turn, step and tool call as it happens, with the subagents under the calls that started them; slash commands and setting changes among the turns.')}
+          {term('g-t2', 'Stats', 'the session at a glance: tools, permission checks, added context, the model, and what was sent to your telemetry collector.')}
+          {term('g-t3', 'Prompt', 'what the model is told: the system prompt, the blocks in front of the first message and your CLAUDE.md files, the tools and agent types it is offered, the plugins in the loop, the skills loaded.')}
+          {term('g-t4', 'Context', 'how full the context window is and what fills it, the cost, the rate limits, the compactions.')}
+
           {section('Reading the timeline')}
           {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
+          {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
+          {term('g-s6', 'rewritten', 'a hook changed the call’s arguments before it ran: open its step for both versions.')}
+          {term('g-s7', 'Subagent', 'under an Agent call, the helper it started: its type, model, steps and tool calls; open it for the prompt it was given and its own turns.')}
+          {term('g-s8', 'Turn titles', 'a turn you did not type is named by its sender: Report from subagent…, Background task ended, Message from another session, Prompt from plugin…')}
+          {term('g-s9', '✎', 'a hook changed your message before the model read it; open the turn for what you typed.')}
+          {term('g-s10', '↳', 'a message that arrived while the turn ran: yours typed meanwhile, or a task’s notification.')}
+          {term('g-s11', '+', 'what Claude Code added to the model’s reading besides your message.')}
+          {term('g-s12', '✉', 'messages the turn’s loop sent to other agents or received from them.')}
+          {term('g-s13', '⇣', 'a compaction: the conversation was summarized to free the context.')}
+          {term('g-s14', '/ and ⚙', 'a slash command you (or a plugin) ran, and a setting that changed: rows of their own among the turns.')}
+          {term('g-s15', '⊘ blocked', 'a message a hook stopped before it entered: no turn ran.')}
           {term('g-s4', 'Colors', 'are kept for what needs attention: yellow waits, red failed or was refused. Routine details are dim.')}
 
           {section('Words')}
@@ -2596,6 +2613,8 @@ export const register: Register = on => {
           {term('g-w7', 'Auto mode.', 'A permission mode in which Claude Code settles approvals itself instead of asking you.')}
           {term('g-w8', 'Subagent.', 'A helper Claude starts for a sub-task, with a conversation of its own. It is drawn under the Agent call that started it: its type, its model, the prompt it was given, and its own turns, steps and tool calls.')}
           {term('g-w20', 'Messages between agents.', 'Agents and sessions talk by message: the model’s SendMessage tool, a teammate, another Claude session, a relay. Each turn lists the messages its loop sent and received, and what became of them.')}
+          {term('g-w21', 'Mod.', 'A plugin with code that hooks into Claude Code’s loop, as Glass Box does. The Prompt tab lists the plugins and mods in the loop and what Glass Box saw them do.')}
+          {term('g-w22', 'Telemetry.', 'Records Claude Code logs about its own use. Stats shows those sent to a collector your operator configured; Anthropic’s own are out of a mod’s reach.')}
           {term('g-w9', 'MCP tool.', 'A tool from an external server, shown as tool ·server.')}
           {term('g-w13', 'System prompt.', 'The standing instructions sent before the conversation on every request: how Claude Code works, your environment, your tools. The Prompt tab shows it section by section.')}
           {term('g-w14', 'Instruction files.', 'Your CLAUDE.md files (and the files they import with @). They reach the model in front of the conversation’s first message.')}

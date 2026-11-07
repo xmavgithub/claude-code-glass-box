@@ -87,9 +87,11 @@ beside the session's counts, a **Guide** button (`g`):
   prompt, tools, memory files, MCP servers, messages, free space), as
   /context counts it; the session's cost and each recent turn's; the
   rate-limit windows and when they reset; the compactions.
-- **Guide**: the loop above, a legend of the marks and colors, and a
-  glossary (token, context, cache, effort, permission rule, hook, auto mode,
-  subagent, MCP tool, server tool).
+- **Guide**: the loop above, what each tab holds, a legend of every mark the
+  Timeline draws, and a glossary (token, context, cache, effort, thinking,
+  permission rule, hook, auto mode, subagent, messages between agents, mod,
+  telemetry, MCP tool, system prompt, skill, ToolSearch, compaction, rate
+  limits, added context, rewritten call, server tool).
 
 In the Timeline:
 
@@ -195,6 +197,10 @@ not installed.
   the step is over, but not how they worked inside. The advisor's model is the
   one its result names or, failing that, the one your settings name; the API
   does not otherwise say which model answered.
+- Tested on the terminal, in VS Code and in the Claude Code desktop app. In
+  Cowork it did not show when loaded from a local folder
+  (`CLAUDE_CODE_PLUGIN_DIRS`); whether it runs there as a plugin saved to your
+  account is untested.
 - The mod API it builds on is in early access and may change between Claude
   Code releases.
 

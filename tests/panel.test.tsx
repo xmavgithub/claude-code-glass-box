@@ -248,7 +248,7 @@ test('the Stats tab sums up tools, permissions and the model', async ($, on) => 
   }
 })
 
-test('How it works explains the loop, with the numbers of the last turn', async ($, on) => {
+test('the Guide explains the loop with the numbers of the last turn, the tabs and every mark', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 1000) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -278,6 +278,11 @@ test('How it works explains the loop, with the numbers of the last turn', async 
   expect(all).toContain('The loop')
   expect(has(all, /^2\. Step\. Claude Code sends the whole conversation/)).toBe(true)
   expect(all).toContain('Your last turn: 1 step, 0 tool calls, 340 tokens written, 2.5s.')
+  // The tabs, and every mark the Timeline draws, are explained.
+  expect(all).toContain('The tabs')
+  for (const mark of ['∴ text', 'rewritten', 'Subagent', 'Turn titles', '✎', '↳', '+', '✉', '⇣', '/ and ⚙', '⊘ blocked', 'Mod.', 'Telemetry.']) {
+    expect(has(all, new RegExp(`^${mark.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`))).toBe(true)
+  }
   expect(has(all, /^Context\. Everything the model reads at a step/)).toBe(true)
   await ui.unmount()
 })
@@ -386,7 +391,7 @@ test('text added to the context is listed under its turn, by who wrote it', asyn
   }
 })
 
-test('Instructions shows the system prompt, the first message’s blocks, the tools and the skills', async ($, on) => {
+test('the Prompt tab shows the system prompt, the first message’s blocks, the tools and the skills', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 1000) }))
   on('prompt.compose', () => ({

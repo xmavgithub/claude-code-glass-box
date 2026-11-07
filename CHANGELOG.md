@@ -51,8 +51,8 @@ everything below is on `main`. 1.0 will be released when the criteria in
   The meters are two colored boxes, blue, yellow from 70% and red from 90%,
   drawn the same on every surface.
 - **Guide**: the agent loop in five steps with the numbers of your last
-  turn, a legend of marks and colors, a glossary, and what Glass Box cannot
-  see.
+  turn, what each tab holds, a legend of every mark the Timeline draws, a
+  glossary, and what Glass Box cannot see.
 
 #### What the Timeline shows
 
