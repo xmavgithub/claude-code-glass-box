@@ -171,8 +171,55 @@ async function now($: EngineInterface): Promise<number> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Secrets: hidden before anything is stored, so no copy of them is kept.
+// A pattern match, not a guarantee: known key formats, headers, URL
+// passwords and `name=value` pairs whose name says it is a secret. The name
+// stays, so it still reads what was there.
+
+const HIDDEN = '[hidden]'
+// Room past the cut, so a secret across it is still recognized whole.
+const MASK_MARGIN = 512
+
+const SECRETS: readonly [RegExp, (match: string, ...groups: string[]) => string][] = [
+  // A private key: the whole block.
+  [/-----BEGIN ([A-Z ]*)PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+    (_, kind) => `-----BEGIN ${kind}PRIVATE KEY----- ${HIDDEN}`],
+  // Keys known by their prefix: Anthropic and OpenAI, GitHub, GitLab, AWS,
+  // Slack, Google, Stripe, npm, Hugging Face; and JSON Web Tokens.
+  [/\bsk-[A-Za-z0-9_-]{16,}/g, () => HIDDEN],
+  [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})/g, () => HIDDEN],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, () => HIDDEN],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, () => HIDDEN],
+  [/\bAIza[0-9A-Za-z_-]{35}/g, () => HIDDEN],
+  [/\b[rsp]k_(?:live|test)_[A-Za-z0-9]{16,}/g, () => HIDDEN],
+  [/\b(?:npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,})\b/g, () => HIDDEN],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, () => HIDDEN],
+  // Credentials in a header: `Authorization: Bearer …`. A word of letters
+  // alone ("Basic authentication") is prose, not a credential.
+  [/\b(Bearer|Basic|Token)(\s+)(?=[A-Za-z]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{12,}/g, (_, scheme, space) => `${scheme}${space}${HIDDEN}`],
+  // A password in a URL: `https://user:pass@host`.
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+):[^\s@/]+@/gi, (_, before) => `${before}:${HIDDEN}@`],
+  // A secret in a query string: `?token=…`, `&api_key=…`.
+  [/([?&](?:access_token|refresh_token|token|api_key|apikey|key|secret|password|signature|sig)=)[^&\s#"'\\]+/gi,
+    (_, name) => `${name}${HIDDEN}`],
+  // `NAME=value`, `name: value`, `"name": "value"` (also inside JSON text),
+  // when the name ends in a word that says it is a secret.
+  [/\b([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credentials?))(\\?["']?[ \t]*[:=][ \t]*\\?["']?)(?!\d+\b)(?!\[hidden\])[^\s"'\\,;&}]{8,}/gi,
+    (_, name, between) => `${name}${between}${HIDDEN}`],
+]
+
+function mask(text: string): string {
+  let out = text
+  for (const [pattern, replace] of SECRETS) out = out.replace(pattern, replace as (match: string) => string)
+  return out
+}
+
+/** Secrets hidden, then cut to `max`; the count left out is of the text as it was. */
 const clip = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max)}… (+${text.length - max} chars)` : text
+  text.length > max
+    ? `${mask(text.slice(0, max + MASK_MARGIN)).slice(0, max)}… (+${text.length - max} chars)`
+    : mask(text)
 
 const firstLine = (text: string) => text.trim().split('\n', 1)[0] ?? ''
 
@@ -252,6 +299,9 @@ function summarize(args: Record<string, unknown>): string {
   const json = JSON.stringify(args)
   return json === '{}' ? '' : json
 }
+
+/** The call's one-line summary, secrets hidden: it heads the row and the banner. */
+const summaryOf = (args: Record<string, unknown>) => mask(summarize(args))
 
 /** The arguments a hook changed: compared key by key, as JSON. */
 function diffArgs(before: Record<string, unknown>, after: Record<string, unknown>): Change[] {
@@ -656,7 +706,7 @@ async function readThinking(
     ...(s.thinking === '' && text !== ''
       ? {
           thought: true,
-          thinking: text.length > MAX_THINKING ? `${text.slice(0, MAX_THINKING)}…` : text,
+          thinking: mask(text.length > MAX_THINKING ? `${text.slice(0, MAX_THINKING)}…` : text),
           thinkingChars: text.length,
         }
       : {}),
@@ -950,7 +1000,7 @@ export const register: Register = on => {
         parentAgentId: e.parentAgentId ?? null,
         at,
         type: e.subagentType,
-        description: e.description,
+        description: mask(e.description),
         prompt: clip(e.prompt, MAX_SPAWN_PROMPT),
         promptChars: e.prompt.length,
         requested: e.model ?? null,
@@ -1011,7 +1061,7 @@ export const register: Register = on => {
     let thought = false
     let thinkingAt = 0
     // Clipped with "…" alone: the total is kept apart, in thinkingChars.
-    const shownThinking = () => (thinking.length > MAX_THINKING ? `${thinking.slice(0, MAX_THINKING)}…` : thinking)
+    const shownThinking = () => mask(thinking.length > MAX_THINKING ? `${thinking.slice(0, MAX_THINKING)}…` : thinking)
     try {
       for await (const chunk of stream) {
         if (chunk.kind === 'thinking') {
@@ -1350,7 +1400,7 @@ export const register: Register = on => {
         at,
         type: 'command',
         name: e.command,
-        value: e.args,
+        value: mask(e.args),
         previous: null,
         by: e.origin.kind,
         plugin: e.origin.kind === 'plugin' ? e.origin.name : null,
@@ -1440,7 +1490,7 @@ export const register: Register = on => {
       const record: Verdict = {
         id,
         decision: verdict.decision,
-        reason: verdict.reason ?? null,
+        reason: verdict.reason === undefined ? null : mask(verdict.reason),
         rule: verdict.rule ?? null,
         hook: verdict.hook ?? null,
         setting: verdict.setting ?? null,
@@ -1463,7 +1513,7 @@ export const register: Register = on => {
     const call: ToolCall = {
       id: e.tool_use_id,
       tool: e.tool,
-      summary: summarize(args),
+      summary: summaryOf(args),
       input: stringify(args),
       output: '',
       status: 'running',
@@ -2677,6 +2727,7 @@ export const register: Register = on => {
           {term('g-s13', '⇣', 'a compaction: the conversation was summarized to free the context.')}
           {term('g-s14', '/ and ⚙', 'a slash command you (or a plugin) ran, and a setting that changed: rows of their own among the turns.')}
           {term('g-s15', '⊘ blocked', 'a message a hook stopped before it entered: no turn ran.')}
+          {term('g-s18', '[hidden]', 'a secret (a key, a token, a password) Glass Box hid before storing anything: it keeps no copy. It goes by known formats, so a secret in another one shows as it is.')}
           {term('g-s4', 'Colors', 'are kept for what needs attention: yellow waits, red failed or was refused. Routine details are dim.')}
 
           {section('Words')}

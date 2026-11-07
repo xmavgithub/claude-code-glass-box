@@ -280,7 +280,7 @@ test('the Guide explains the loop with the numbers of the last turn, the tabs an
   expect(all).toContain('Your last turn: 1 step, 0 tool calls, 340 tokens written, 2.5s.')
   // The tabs, and every mark the Timeline draws, are explained.
   expect(all).toContain('The tabs')
-  for (const mark of ['∴ text', 'rewritten', 'Subagent', 'Turn titles', '✎', '↳', '+', '✉', '⇣', '/ and ⚙', '⊘ blocked', 'Mod.', 'Telemetry.']) {
+  for (const mark of ['∴ text', 'rewritten', 'Subagent', 'Turn titles', '✎', '↳', '+', '✉', '⇣', '/ and ⚙', '⊘ blocked', '[hidden]', 'Mod.', 'Telemetry.']) {
     expect(has(all, new RegExp(`^${mark.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`))).toBe(true)
   }
   expect(has(all, /^Context\. Everything the model reads at a step/)).toBe(true)
@@ -1128,5 +1128,50 @@ test('a subagent’s turns are listed newest first, the newest open', async ($, 
   const all = await texts(ui)
   const runs = all.filter(t => t === '“second run”' || t === '“first run”')
   expect(runs).toEqual(['“second run”', '“first run”'])
+  await ui.unmount()
+})
+
+test('secrets are hidden before they are stored: in the row, the input, the output and the thinking', async ($, on) => {
+  // Made up, and built at run time so secret scanners do not flag this file.
+  const KEY = ['sk', 'ant', 'api03', 'AbCdEfGhIjKlMnOpQrStUv'].join('-')
+  const TOKEN = ['ghp', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('_')
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'thinking', index: 0, text: `The key is ${KEY}; use it.` } as const
+    yield { kind: 'tool', index: 1, id: 'toolu_S', name: 'Bash' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: USAGE } as const
+  })
+  on('tool.check', () => ({ decision: 'allow' }) as const)
+  on('tool.call', () => ({
+    result: {},
+    text: `GITHUB_TOKEN=${TOKEN}\ncommit 3f786850e387550fdab836ed7e6dc881de23001b\nBasic authentication is required`,
+  }))
+  // Every value Glass Box writes to the session's state, as written.
+  const written: string[] = []
+  on('state.set', async ($, e, next) => {
+    written.push(JSON.stringify(e))
+    return next(e)
+  })
+
+  await $.turn.start({ turnId: 'T1', text: 'deploy' })
+  for await (const _chunk of $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // drain
+  }
+  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_S' } as never)
+  await $.tool.call({ tool: 'Bash', command: `ANTHROPIC_API_KEY=${KEY} ./deploy.sh`, tool_use_id: 'toolu_S' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 's:T1:0' })
+  const all = await texts(ui)
+  // The name stays, the value goes; an id or a commit hash is not a secret.
+  expect(has(all, /ANTHROPIC_API_KEY=\[hidden\] \.\/deploy\.sh$/)).toBe(true)
+  expect(has(all, /"command": "ANTHROPIC_API_KEY=\[hidden\] \.\/deploy\.sh"/)).toBe(true)
+  expect(has(all, /GITHUB_TOKEN=\[hidden\]\ncommit 3f786850e387550fdab836ed7e6dc881de23001b\nBasic authentication is required/)).toBe(true)
+  expect(has(all, /The key is \[hidden\]; use it\./)).toBe(true)
+  expect(all.some(t => t.includes(KEY) || t.includes(TOKEN))).toBe(false)
+  expect(written.length > 0).toBe(true)
+  expect(written.some(w => w.includes(KEY) || w.includes(TOKEN))).toBe(false)
   await ui.unmount()
 })

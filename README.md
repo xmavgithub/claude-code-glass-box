@@ -188,8 +188,17 @@ not installed.
 
 - Everything stays on your machine, in the session's own state. Glass Box sends
   nothing anywhere and keeps nothing across sessions.
-- The pane shows tool inputs and outputs as they are, which can include file
-  contents or command output you would not want on a shared screen.
+- Secrets are hidden before Glass Box stores anything, so it keeps no copy of
+  them: keys known by their prefix (Anthropic and OpenAI, GitHub, GitLab, AWS,
+  Slack, Google, Stripe, npm, Hugging Face), JSON Web Tokens, private key
+  blocks, `Bearer` and `Basic` credentials, a password in a URL, a token in a
+  query string, and `NAME=value` pairs whose name ends in password, secret,
+  token, key or credentials. The name stays and the value reads `[hidden]`.
+  This works by matching patterns, so it is not a guarantee: a secret in
+  another format is shown as it is.
+- Apart from secrets, the pane shows tool inputs and outputs as they are, which
+  can include file contents or command output you would not want on a shared
+  screen.
 - To stay light it keeps the last 30 turns, 300 tool calls and 200 items of
   added context, and clips long texts (prompts at 600 characters, step text at
   1,200, thinking at 3,000, inputs at 2,000, outputs at 1,500, added context at

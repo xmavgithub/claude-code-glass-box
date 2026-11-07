@@ -151,6 +151,10 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 - Glass Box only observes: every hook passes its event on untouched, and a
   failure of its own never touches the session.
+- Secrets are hidden before anything is stored (keys known by their prefix,
+  JSON Web Tokens, private keys, `Bearer` credentials, passwords in URLs and
+  query strings, `NAME=value` pairs named as secrets): the pane shows
+  `[hidden]` and keeps no copy. Matching patterns, not a guarantee.
 - A step interrupted with Esc closes as "no response" instead of staying
   "running".
 - State is bounded (turns, calls, context items, skills) and long texts are
