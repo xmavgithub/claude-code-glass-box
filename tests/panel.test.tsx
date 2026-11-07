@@ -1074,3 +1074,43 @@ test('a call waiting for approval is loud on every tab, and a thinking step says
     // drain
   }
 })
+
+test('a subagent’s turns are listed newest first, the newest open', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    if (e.turnId === 'T1') yield { kind: 'tool', index: 0, id: 'toolu_A', name: 'Agent' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as const
+  })
+  on('tool.call', () => ({ result: {}, text: 'done' }))
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'A1' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+
+  await $.turn.start({ turnId: 'T1', text: 'delegate' })
+  for await (const _chunk of $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // drain
+  }
+  await $.tool.call({ tool: 'Agent', description: 'look', prompt: 'Look around.', tool_use_id: 'toolu_A' } as never)
+  await $.agent.spawn({
+    tool_use_id: 'toolu_A',
+    prompt: 'Look around.',
+    description: 'look',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+  } as never)
+  for (const [turnId, text] of [['S1', 'first run'], ['S2', 'second run']] as const) {
+    await $.turn.start({ turnId, text, agentId: 'A1' } as never)
+    await $.turn.complete({ turnId, agentId: 'A1', reason: 'answer', answer: 'ok', durationMs: 1000, isAborted: false } as never)
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'a:toolu_A|A1' })
+  const all = await texts(ui)
+  const runs = all.filter(t => t === '“second run”' || t === '“first run”')
+  expect(runs).toEqual(['“second run”', '“first run”'])
+  await ui.unmount()
+})

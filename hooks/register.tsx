@@ -1924,10 +1924,11 @@ export const register: Register = on => {
             </Box>
           )}
           {open &&
-            agentTurns.map((turn, i) => {
+            // Newest turn first, as everywhere; the newest is the one open.
+            [...agentTurns].reverse().map((turn, i) => {
               base += 2
               try {
-                return <Box key={`aturn-${turn.id}`} paddingLeft={2}>{renderTurn(turn, i === agentTurns.length - 1)}</Box>
+                return <Box key={`aturn-${turn.id}`} paddingLeft={2}>{renderTurn(turn, i === 0)}</Box>
               } finally {
                 base -= 2
               }

@@ -56,8 +56,9 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 #### What the Timeline shows
 
-- **Newest first**: the steps in a turn are listed newest first, as the
-  turns are; the model and effort still show where they changed.
+- **Newest first**: the steps in a turn, and a subagent's turns under its
+  call, are listed newest first, as the turns are; the model and effort
+  still show where they changed.
 - **Waiting for your approval, impossible to miss**: a call waiting for
   your permission is shown at the top of every tab in reverse colors
   (`⚠ WAITING FOR YOUR APPROVAL`, the tool and its argument) and marked the
