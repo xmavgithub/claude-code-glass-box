@@ -30,7 +30,7 @@ Every item below is held to these.
 
 ## Where we are
 
-In development towards 1.0, on `main` (no releases before 1.0). Done so far:
+Glass Box 1.0.0 was released on 2026-11-07. It covers:
 the loop itself and what changes it (turns, steps, server tools such as the
 advisor, tool calls and their permission verdicts, calls a hook rewrote,
 everything added to the model's context), and what the model is told (the
@@ -131,8 +131,8 @@ operations on `$`) against what Glass Box records. In order of value:
 - [x] **Out of reach, said.** The README lists what Glass Box leaves out and
   why: drawing (`ui.*`), the prompt box (`prompt.fill`, `prompt.suggest`,
   `prompt.edit`, `prompt.change`, `prompt.autocomplete`), command and setting
-  descriptions, the engine's lifecycle (`engine.create`, `session.end`,
-  surfaces attaching), the clock, stores, state and environment;
+  descriptions, the engine's lifecycle (`engine.create`, surfaces
+  attaching; `session.end` is hooked only to start afresh after a `/clear`), the clock, stores, state and environment;
   `prompt.section` and `prompt.mention`, covered by `prompt.compose` and
   `prompt.attachment`; `attribution.text`; Anthropic's own telemetry and
   feature marks (`telemetry.log` on `anthropic`, `telemetry.mark`), which
@@ -150,7 +150,7 @@ operations on `$`) against what Glass Box records. In order of value:
 
 ## 1.0
 
-Glass Box reaches 1.0 when:
+Reached with 1.0.0 on 2026-11-07. The criteria it met:
 
 - every event of the agent loop that Claude Code exposes is shown or
   explicitly listed as out of reach;

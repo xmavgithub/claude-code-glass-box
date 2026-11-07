@@ -262,9 +262,9 @@ What it leaves out, and why:
 
 ## Roadmap
 
-Glass Box is in development towards 1.0, with no releases before then. See
-[ROADMAP.md](ROADMAP.md): the vision, the principles every feature is held to,
-what is done, and what comes next.
+Glass Box 1.0 shows every event of the agent loop that Claude Code opens to
+mods, or says why it leaves one out. See [ROADMAP.md](ROADMAP.md): the vision,
+the principles every feature is held to, what is done, and what comes next.
 Discussion and pull requests are welcome.
 
 ## Development

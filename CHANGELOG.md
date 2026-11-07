@@ -4,11 +4,11 @@ All notable changes to Glass Box are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Glass Box is in development towards 1.0: there are no releases yet, and
-everything below is on `main`. 1.0 will be released when the criteria in
-[ROADMAP.md](ROADMAP.md#10) are met.
-
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-07
+
+The first release: it meets the 1.0 criteria in [ROADMAP.md](ROADMAP.md#10).
 
 ### Added
 
@@ -173,4 +173,5 @@ everything below is on `main`. 1.0 will be released when the criteria in
 - README, MIT license, contributing guide, code of conduct, security policy,
   issue and PR templates, CI, roadmap.
 
-[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/commits/main
+[Unreleased]: https://github.com/xmavgithub/claude-code-glass-box/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/xmavgithub/claude-code-glass-box/releases/tag/v1.0.0

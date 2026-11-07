@@ -1,6 +1,6 @@
 {
   "name": "glass-box",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "A live audit pane beside the chat: every turn, model step, permission verdict and tool call Claude Code makes, with inputs, outputs, tokens and timing",
   "author": {
     "name": "Mauro Salvo",
