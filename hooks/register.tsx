@@ -2169,7 +2169,9 @@ export const register: Register = on => {
           {open && renderInjections(`i:${turn.id}`, injectionsByTurn.get(turn.id) ?? [], 2)}
           {open && renderMail(`m:${turn.id}`, mailList.filter(l => l.turnId === turn.id), 2)}
           {open && (compactionsByTurn.get(turn.id) ?? []).map(c => compactionLine(c, 2))}
-          {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1]))}
+          {/* Newest step first, as turns are; the model is told against the step
+              that ran before, so it shows where it changed. */}
+          {open && turnSteps.map((step, i) => renderStep(step, turnSteps[i - 1])).reverse()}
         </Box>
       )
     }

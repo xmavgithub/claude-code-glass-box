@@ -20,14 +20,14 @@ agent's process instead of trusting only its final answer.
 ▾ ● Turn · 14:02 · 2 steps · 4 tools · ctx 42.2k · running
   “add a license and push the repo”
 
+  ▸ ● Step 2 · running
+
   ▸ ✓ Step 1 · opus-5-5 high · 3.1s · out 340 · → tools
     › I'll check the repository state first.
     ✓ Bash  412ms  Bash(git:*)  git status
     ✓ Read  9ms  allowed  LICENSE
     ✓ scan_secrets ·plugin-authoring  96ms  ~/project
     ⊘ Write  3ms  denied · Write(/etc/**)  /etc/hosts
-
-  ▸ ● Step 2 · running
 
 ▸ ✓ Turn · 13:58 · 2 steps · 3 tools · ctx 40.1k · 9.7s
   “run the tests”
@@ -100,7 +100,7 @@ In the Timeline:
 
 | Level | What you see | Expanded |
 | --- | --- | --- |
-| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by where its message came from, as Claude Code stamps it: a background subagent's report, another session or agent, a background task, a scheduled task, a plugin, a channel. `✎` when a hook changed your message | Its steps; for a turn you did not type, who sent it and its whole text as the model read it; what you typed when a hook changed it; the messages that arrived while it ran. A message a hook stopped gets a `⊘ blocked` row with the reason |
+| **Turn** | The prompt that started it (yours or a subagent's), start time, steps, tools, context size, duration, outcome. A turn you did not type is named by where its message came from, as Claude Code stamps it: a background subagent's report, another session or agent, a background task, a scheduled task, a plugin, a channel. `✎` when a hook changed your message | Its steps, newest first; for a turn you did not type, who sent it and its whole text as the model read it; what you typed when a hook changed it; the messages that arrived while it ran. A message a hook stopped gets a `⊘ blocked` row with the reason |
 | **Step** | One request to the model: model and effort (when they change), duration, output tokens, why it stopped, the first line of its thinking (`∴`) and of what it wrote (`›`) | Its thinking as it streamed, with its size, the full text, the token breakdown (context, cached, written, new, output), message count, server-side tools such as the advisor, and the details of its tool calls |
 | **Added to the context** | One line under the turn's prompt: how many items Claude Code put in front of the model besides your message, their size, and who wrote them (Claude Code, hooks, plugins) | Each item: its source (a SessionStart hook, say), its kind, size, time and full text |
 | **Slash command** | A row of its own among the turns, at its time: the command as typed, who ran it (you, a plugin, the phone), and whether it left notes for the model | What it printed, and the notes it left for the model to read, never shown to you |
@@ -110,12 +110,13 @@ In the Timeline:
 | **Subagent** | Under the Agent call that started it: its type, the model it runs on, steps, tool calls, duration, cost, and whether it is a fork, runs in the background, is a teammate or a workflow's agent. Open while it works | What kind of agent it is, the model the call asked for, the permission mode it inherits, the prompt it was given, and its own turns, steps and tool calls (and the subagents it starts, nested again) |
 | **Tool call** | One line: status, tool, duration, what the permission check came to (rule, hook, allowed, approved, rejected, denied), `rewritten` when a hook changed its arguments, main argument (both versions when a hook changed it) | Under its open step: full input as JSON, the output as Claude read it, and the complete verdict: decision, reason, rule, hook, setting, plugin, approver |
 
-The newest turn is open; older turns fold away. A header line counts turns,
-steps, tool calls and failures for the session, with **Guide** (`g`) and
-**Clear** (`c`) beside it. A subagent's turn whose Agent call Glass Box did
-not record (it started before Glass Box loaded) is listed at the top level.
-Tool calls that no recorded step asked for (raised by another plugin, or made
-before Glass Box loaded) are listed at the bottom under **Other tool calls**.
+The newest turn is open; older turns fold away. Turns, and the steps in a
+turn, are listed newest first. A header line counts turns, steps, tool calls
+and failures for the session, with **Guide** (`g`) and **Clear** (`c`) beside
+it. A subagent's turn whose Agent call Glass Box did not record (it started
+before Glass Box loaded) is listed at the top level. Tool calls that no
+recorded step asked for (raised by another plugin, or made before Glass Box
+loaded) are listed at the bottom under **Other tool calls**.
 
 ## Install
 

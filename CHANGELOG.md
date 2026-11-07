@@ -56,6 +56,8 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 #### What the Timeline shows
 
+- **Newest first**: the steps in a turn are listed newest first, as the
+  turns are; the model and effort still show where they changed.
 - **A pulsing dot** marks what is running (turns, steps, subagents, tool
   calls, server tools) in VS Code, the desktop app and mobile: an SVG
   animation the surface runs itself, at no cost to the session. The terminal

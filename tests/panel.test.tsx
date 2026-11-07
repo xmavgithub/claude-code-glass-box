@@ -86,11 +86,11 @@ test('a turn shows its prompt, its steps, and under each step the tool calls it 
     expect(has(all, /^✓ Step 2 · [\d.]+m?s · wrote 340 tokens · answered$/)).toBe(true)
     expect(all).toContain('› Let me list the files.')
     expect(has(all, /^✓ Bash {2}[\d.]+m?s {2}allowed: rule Bash\(ls:\*\) {2}ls$/)).toBe(true)
-    // The call sits under step 1, before step 2: no "Other tool calls" section.
+    // Newest step first; the call sits under step 1: no "Other tool calls" section.
     const order = all
       .filter(t => /^✓ (Step \d|Bash) /.test(t))
       .map(t => (t.startsWith('✓ Bash') ? 'Bash' : t.slice(2, 8)))
-    expect(order).toEqual(['Step 1', 'Bash', 'Step 2'])
+    expect(order).toEqual(['Step 2', 'Step 1', 'Bash'])
     expect(has(all, /Other tool calls/)).toBe(false)
     await ui.unmount()
   }
