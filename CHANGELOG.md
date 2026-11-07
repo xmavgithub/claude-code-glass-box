@@ -58,10 +58,15 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 - **Newest first**: the steps in a turn are listed newest first, as the
   turns are; the model and effort still show where they changed.
-- **A pulsing dot** marks what is running (turns, steps, subagents, tool
-  calls, server tools) in VS Code, the desktop app and mobile: an SVG
-  animation the surface runs itself, at no cost to the session. The terminal
-  keeps a still `●`.
+- **Waiting for your approval, impossible to miss**: a call waiting for
+  your permission is shown at the top of every tab in reverse colors
+  (`⚠ WAITING FOR YOUR APPROVAL`, the tool and its argument) and marked the
+  same way on its row, until you answer.
+- **Animations** for what is running, in VS Code, the desktop app and
+  mobile: a pulsing dot (turns, steps, tool calls, server tools), two dots
+  taking turns for a subagent at work, three dots for a model thinking, a
+  fast orange pulse for a call awaiting approval. SVG animations the surface
+  runs itself, at no cost to the session; the terminal keeps a still `●`.
 
 - **Steps**: model and effort (where they change), duration, tokens written,
   why the model stopped in words ("asked for 3 tools", "answered"), the first

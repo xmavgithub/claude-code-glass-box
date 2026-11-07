@@ -1015,3 +1015,62 @@ test('Stats shows what was sent to the operator’s telemetry collector, and say
   }
 })
 
+
+test('a call waiting for approval is loud on every tab, and a thinking step says so while it runs', async ($, on) => {
+  let clock = 1_700_000_000_000
+  on('clock.now', () => ({ value: (clock += 500) }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    if (e.index === 0) yield { kind: 'tool', index: 0, id: 'toolu_W', name: 'Bash' } as const
+    if (e.index === 1) yield { kind: 'thinking', index: 0, text: '' } as const
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: USAGE } as const
+  })
+  on('tool.check', () => ({ decision: 'ask' }) as const)
+  on('tool.call', () => ({ result: {}, text: 'pushed' }))
+  // The ask waits for an answer, as it waits for you: here, until the test
+  // lets it go.
+  let release = () => {}
+  const gate = new Promise<void>(resolve => (release = resolve))
+  on('classic.PermissionRequest', async () => {
+    await gate
+    return {} as never
+  })
+
+  await $.turn.start({ turnId: 'T1', text: 'push it' })
+  for await (const _chunk of $.turn.step({ turnId: 'T1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+    // drain
+  }
+  await $.tool.check({ tool: 'Bash', input: { command: 'git push' }, tool_use_id: 'toolu_W' } as never)
+  const call = $.tool.call({ tool: 'Bash', command: 'git push', tool_use_id: 'toolu_W' })
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    for (const view of ['v:timeline', 'v:stats']) {
+      await ui.press({ key: view })
+      const all = await texts(ui)
+      expect(has(all, /^(?: )?⚠ WAITING FOR YOUR APPROVAL  Bash  git push$/)).toBe(true)
+    }
+    await ui.press({ key: 'v:timeline' })
+    expect(has(await texts(ui), /⚠ AWAITING YOUR APPROVAL/)).toBe(true)
+    if (surface !== 'terminal') expect(await ui.find({ type: 'Svg' })).toBeDefined()
+    await ui.unmount()
+  }
+  release()
+  await call
+
+  // A step that streams its thinking: ∴ thinking while it runs.
+  const step = $.turn.step({ turnId: 'T1', index: 1, model: 'claude-opus-5-5', messageCount: 3 })
+  const iterator = step[Symbol.asyncIterator]()
+  await iterator.next()
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const during = await texts(terminal)
+  expect(during).toContain('∴ thinking…')
+  expect(has(during, /WAITING FOR YOUR APPROVAL/)).toBe(false)
+  await terminal.unmount()
+  const desktop = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await texts(desktop)).toContain('∴ thinking')
+  await desktop.unmount()
+  while (!(await iterator.next()).done) {
+    // drain
+  }
+})

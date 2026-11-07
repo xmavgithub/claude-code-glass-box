@@ -367,6 +367,15 @@ const THINKING_SEEN: Record<string, string> = {
 /** A dot that pulses, for what is running, on the surfaces that draw SVG. */
 const PULSE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#e0a526"><animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite"/></circle></svg>'
+/** Faster, orange and swelling: a tool call waiting for your approval. */
+const ASK_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#ff4d1a"><animate attributeName="r" values="3.2;5.8;3.2" dur="0.6s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0.55;1" dur="0.6s" repeatCount="indefinite"/></circle></svg>'
+/** Two dots taking turns: a subagent at work, told apart from a tool call. */
+const AGENT_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 10"><circle cx="3.5" cy="5" r="3" fill="#e0a526"><animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/></circle><circle cx="10.5" cy="5" r="3" fill="#e0a526"><animate attributeName="opacity" values="0.2;1;0.2" dur="1.2s" repeatCount="indefinite"/></circle></svg>'
+/** Three dots in a wave: the model is thinking. */
+const THINKING_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 6"><circle cx="3" cy="3" r="2" fill="#9a9a9a"><animate attributeName="opacity" values="0.2;1;0.2" dur="1s" begin="0s" repeatCount="indefinite"/></circle><circle cx="9" cy="3" r="2" fill="#9a9a9a"><animate attributeName="opacity" values="0.2;1;0.2" dur="1s" begin="0.2s" repeatCount="indefinite"/></circle><circle cx="15" cy="3" r="2" fill="#9a9a9a"><animate attributeName="opacity" values="0.2;1;0.2" dur="1s" begin="0.4s" repeatCount="indefinite"/></circle></svg>'
 
 const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string | null }> = {
   answer: { icon: '✓', color: 'success', label: null },
@@ -1469,8 +1478,8 @@ export const register: Register = on => {
     // The remote surfaces draw SVG, and run its animation themselves: what is
     // running pulses there at no cost to the session. The terminal keeps ●.
     const Svg = e.surface !== 'terminal' && 'Svg' in elements && elements.Svg !== undefined ? elements.Svg : null
-    const pulse = (key: string) =>
-      Svg === null ? null : <Svg key={key} source={PULSE_SVG} alt="running" width={10} height={10} />
+    const pulse = (key: string, source = PULSE_SVG, alt = 'running', width = 10, height = 10) =>
+      Svg === null ? null : <Svg key={key} source={source} alt={alt} width={width} height={height} />
     const [turnList, stepList, callList, verdictList, toggledList, current, rewriteList, injectionList] =
       await Promise.all([
         read($, turns),
@@ -1521,7 +1530,7 @@ export const register: Register = on => {
       return flat.length > width ? `${flat.slice(0, Math.max(0, width - 1))}…` : flat
     }
 
-    type Part = { text: string; color?: string; dim?: boolean; bold?: boolean } | null | false | undefined
+    type Part = { text: string; color?: string; dim?: boolean; bold?: boolean; inverse?: boolean } | null | false | undefined
     /**
      * One line of styled parts, cut with "…" to `width` cells by Glass Box
      * itself: a surface may wrap styled runs instead of truncating them, and a
@@ -1529,7 +1538,7 @@ export const register: Register = on => {
      */
     const seg = (width: number, parts: Part[]) => {
       let left = Math.max(8, width)
-      const shown: { text: string; color?: string; dim?: boolean; bold?: boolean }[] = []
+      const shown: { text: string; color?: string; dim?: boolean; bold?: boolean; inverse?: boolean }[] = []
       for (const part of parts) {
         if (!part || part.text === '' || left <= 0) continue
         const text = part.text.replace(/[\r\n\t]+/g, ' ')
@@ -1546,7 +1555,7 @@ export const register: Register = on => {
         <Text wrap="truncate-end">
           {shown.map(p =>
             p.color !== undefined ? (
-              <Text color={p.color} bold={p.bold}>
+              <Text color={p.color} bold={p.bold} inverse={p.inverse}>
                 {p.text}
               </Text>
             ) : (
@@ -1676,7 +1685,10 @@ export const register: Register = on => {
 
       return (
         <Box key={`call-${call.id}`} flexDirection="row" alignItems="center" paddingLeft={indent} {...fit(indent)}>
-          {call.status === 'running' && pulse(`pulse-call-${call.id}`)}
+          {call.status === 'running' &&
+            (verdictKind(verdictById.get(call.id), call) === 'awaiting'
+              ? pulse(`pulse-call-${call.id}`, ASK_SVG, 'awaiting your approval', 12, 12)
+              : pulse(`pulse-call-${call.id}`))}
           {seg(room(indent + 2), [
             !(call.status === 'running' && Svg !== null) && { text: status.icon, color: status.color },
             { text: ` ${name}`, bold: true },
@@ -1686,7 +1698,9 @@ export const register: Register = on => {
             outcome !== null &&
               (outcome.color === undefined
                 ? { text: `  ${outcome.label}`, dim: true }
-                : { text: `  ${outcome.label}`, color: outcome.color }),
+                : outcome.label === 'awaiting approval'
+                  ? { text: `  ⚠ AWAITING YOUR APPROVAL `, color: 'warning', bold: true, inverse: true }
+                  : { text: `  ${outcome.label}`, color: outcome.color }),
             rewrite !== undefined && { text: '  rewritten', color: 'suggestion' },
             summary !== '' && { text: `  ${summary}` },
           ])}
@@ -1869,7 +1883,7 @@ export const register: Register = on => {
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
             <Box flexDirection="row" alignItems="center" {...fit(2)}>
-              {running && pulse(`pulse-${key}`)}
+              {running && pulse(`pulse-${key}`, AGENT_SVG, 'subagent at work', 14, 10)}
               {seg(room(2), [
                 !(running && Svg !== null) && { text: icon, color },
                 { text: ' Subagent', bold: true },
@@ -1954,16 +1968,20 @@ export const register: Register = on => {
               ])}
             </Box>
           </Box>
-          {step.thinking !== '' && !open && (
-            <Box paddingLeft={2} {...fit(4)}>
+          {(step.thinking !== '' || (isRunning && step.thought)) && !open && (
+            <Box flexDirection="row" alignItems="center" gap={1} paddingLeft={2} {...fit(4)}>
               <Text dimColor italic wrap="truncate-end">
-                {`∴ ${cut(firstLine(step.thinking), room(8))}`}
+                {`∴ ${step.thinking === '' ? `thinking${Svg === null ? '…' : ''}` : cut(firstLine(step.thinking), room(isRunning && Svg !== null ? 12 : 8))}`}
               </Text>
+              {isRunning && step.thought && pulse(`think-${step.key}`, THINKING_SVG, 'thinking', 18, 6)}
             </Box>
           )}
           {step.thinking !== '' && open && (
             <Box flexDirection="column" paddingLeft={2} {...fit(4)}>
-              <Text color="suggestion">{`thinking · ${formatTokens(step.thinkingChars)} chars${isRunning ? ' so far' : ''}`}</Text>
+              <Box flexDirection="row" alignItems="center" gap={1}>
+                <Text color="suggestion">{`thinking · ${formatTokens(step.thinkingChars)} chars${isRunning ? ' so far' : ''}`}</Text>
+                {isRunning && pulse(`think-open-${step.key}`, THINKING_SVG, 'thinking', 18, 6)}
+              </Box>
               <Text dimColor wrap="wrap">
                 What the model wrote while thinking, before answering, as Claude Code received it. It may be a summary of the model’s reasoning rather than all of it.
               </Text>
@@ -2603,7 +2621,8 @@ export const register: Register = on => {
           {term('g-t4', 'Context', 'how full the context window is and what fills it, the cost, the rate limits, the compactions.')}
 
           {section('Reading the timeline')}
-          {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running is a dot that pulses.')}
+          {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running moves: a pulsing dot, two dots taking turns for a subagent at work, three dots for a model thinking.')}
+          {term('g-s16', '⚠ WAITING FOR YOUR APPROVAL', 'a tool call waits for you to allow it: shown at the top of every tab, in strong colors, until you answer. The session does nothing else meanwhile.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
@@ -3219,10 +3238,35 @@ export const register: Register = on => {
       </Box>
     )
 
+    // A call that waits for your approval, shown above every tab: it is what
+    // the session is stuck on until you answer.
+    const awaiting = callList.filter(c => c.status === 'running' && verdictKind(verdictById.get(c.id), c) === 'awaiting')
+    const approvalBanner =
+      awaiting.length === 0 ? null : (
+        <Box key="approval" flexDirection="column" marginTop={1}>
+          {awaiting.slice(0, 3).map(c => (
+            <Box key={`approval-${c.id}`} flexDirection="row" alignItems="center" gap={1} {...fit(0)}>
+              {pulse(`approval-pulse-${c.id}`, ASK_SVG, 'awaiting your approval', 12, 12)}
+              {seg(room(4), [
+                { text: ' ⚠ WAITING FOR YOUR APPROVAL ', color: 'warning', bold: true, inverse: true },
+                { text: ` ${toolName(c.tool).name}`, bold: true },
+                c.summary !== '' && { text: `  ${tidy(c.summary)}` },
+              ])}
+            </Box>
+          ))}
+          {awaiting.length > 3 && (
+            <Text color="warning" bold>
+              {`and ${awaiting.length - 3} more`}
+            </Text>
+          )}
+        </Box>
+      )
+
     return (
       <Box flexDirection="column">
         {tabBar}
         {counters}
+        {approvalBanner}
         {current === 'stats'
           ? renderStats()
           : current === 'instructions'

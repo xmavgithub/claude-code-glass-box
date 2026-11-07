@@ -37,13 +37,19 @@ Click a `▸` to open a turn or a step (or give the pane the keyboard, then use
 Tab and Enter). An open step shows its full text, its token breakdown and,
 under each of its tool calls, the call's input, output and permission verdict.
 
+A tool call waiting for your approval is shown at the top of every tab, in
+reverse colors (`⚠ WAITING FOR YOUR APPROVAL`), and marked the same way on
+its row, until you answer.
+
 Status marks: `●` running, `✓` done, `✗` failed, `⊘` denied. In VS Code and
-the desktop app what is running is a dot that pulses, an animation the surface
-runs by itself; the terminal keeps a still `●`, as an animation there would
-mean redrawing the pane on a timer. Color is kept for what needs attention
-(failures, denials, a call waiting for approval); routine verdicts are drawn
-dim. Paths are shown relative to the project, the home folder as `~`, and MCP
-tools by their own name followed by their server.
+the desktop app what is running moves (a pulsing dot; two dots for a subagent
+at work; three for a model thinking; a fast orange pulse for a call awaiting
+approval), animations the surface runs by itself; the terminal keeps a still
+`●`, as an animation there would mean redrawing the pane on a timer. Color is
+kept for what needs attention (failures, denials, a call waiting for
+approval); routine verdicts are drawn dim. Paths are shown relative to the
+project, the home folder as `~`, and MCP tools by their own name followed by
+their server.
 
 ## How Claude Code works, in one minute
 
