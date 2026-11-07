@@ -2713,7 +2713,7 @@ export const register: Register = on => {
           {section('Reading the timeline')}
           {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running moves: a pulsing dot, two dots taking turns for a subagent at work, three dots for a model thinking.')}
           {term('g-s16', '⚠ APPROVAL ASKED', 'Claude Code asked you to allow a tool call: shown at the top of every tab, in strong colors. Until you answer the call waits; Claude Code does not say when you answer, so the mark stays until the call ends.')}
-          {term('g-s17', '▶ WORKING', 'a tool is running now: at the top of the Timeline and on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
+          {term('g-s17', 'WORKING', 'a tool is running now, on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
@@ -3330,20 +3330,15 @@ export const register: Register = on => {
       </Box>
     )
 
-    // What is going on now: a call whose approval was asked of you, above
-    // every tab, since Claude waits for you; the tools at work, on the
-    // Timeline alone.
-    const running = callList.filter(c => c.status === 'running')
-    const awaiting = running.filter(c => verdictKind(verdictById.get(c.id), c) === 'awaiting')
-    const working =
-      current === 'timeline' ? running.filter(c => verdictKind(verdictById.get(c.id), c) !== 'awaiting') : []
-    const nowRow = (c: ToolCall, asked: boolean) => (
+    // A call whose approval was asked of you, above every tab, since Claude
+    // waits for you. The tools at work are marked on their rows alone: most
+    // run for a moment, and a line coming and going would make the pane jump.
+    const awaiting = callList.filter(c => c.status === 'running' && verdictKind(verdictById.get(c.id), c) === 'awaiting')
+    const nowRow = (c: ToolCall) => (
       <Box key={`now-${c.id}`} flexDirection="row" alignItems="center" gap={1} {...fit(0)}>
-        {asked ? pulse(`now-pulse-${c.id}`, ASK_SVG, 'approval asked', 12, 12) : pulse(`now-pulse-${c.id}`)}
+        {pulse(`now-pulse-${c.id}`, ASK_SVG, 'approval asked', 12, 12)}
         {seg(room(4), [
-          asked
-            ? { text: ' ⚠ APPROVAL ASKED ', color: 'warning', bold: true, inverse: true }
-            : { text: ' ▶ WORKING ', color: 'suggestion', bold: true, inverse: true },
+          { text: ' ⚠ APPROVAL ASKED ', color: 'warning', bold: true, inverse: true },
           { text: ` ${toolName(c.tool).name}`, bold: true },
           c.agentId !== null && { text: ' [subagent]', color: 'subtle' },
           c.summary !== '' && { text: `  ${tidy(c.summary)}` },
@@ -3351,20 +3346,15 @@ export const register: Register = on => {
       </Box>
     )
     const approvalBanner =
-      awaiting.length + working.length === 0 ? null : (
+      awaiting.length === 0 ? null : (
         <Box key="now" flexDirection="column" marginTop={1}>
-          {awaiting.slice(0, 3).map(c => nowRow(c, true))}
-          {awaiting.length > 0 && (
-            <Box paddingLeft={2} {...fit(2)}>
-              <Text color="warning" wrap="wrap">
-                Claude Code asked for your approval: until you answer, the call waits. Once you approve it works, but Claude Code does not say when you answered, so this stays until the call ends.
-              </Text>
-            </Box>
-          )}
-          {working.slice(0, 3).map(c => nowRow(c, false))}
-          {awaiting.length + working.length > 6 || working.length > 3 ? (
-            <Text dimColor>{`and ${Math.max(0, working.length - 3)} more at work`}</Text>
-          ) : null}
+          {awaiting.slice(0, 3).map(c => nowRow(c))}
+          <Box paddingLeft={2} {...fit(2)}>
+            <Text color="warning" wrap="wrap">
+              Claude Code asked for your approval: until you answer, the call waits. Once you approve it works, but Claude Code does not say when you answered, so this stays until the call ends.
+            </Text>
+          </Box>
+          {awaiting.length > 3 && <Text dimColor>{`and ${awaiting.length - 3} more asked`}</Text>}
         </Box>
       )
 

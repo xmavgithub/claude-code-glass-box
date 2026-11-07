@@ -1016,7 +1016,7 @@ test('Stats shows what was sent to the operator’s telemetry collector, and say
 })
 
 
-test('an approval asked of you is loud on every tab, a tool at work on the Timeline, and a thinking step says so while it runs', async ($, on) => {
+test('an approval asked of you is loud on every tab, a tool at work on its row, and a thinking step says so while it runs', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 500) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -1056,12 +1056,12 @@ test('an approval asked of you is loud on every tab, a tool at work on the Timel
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    // The approval asked shows on every tab; the tools at work, on the Timeline alone.
+    // The approval asked shows on every tab; a tool at work, on its row alone.
     for (const view of ['v:timeline', 'v:stats']) {
       await ui.press({ key: view })
       const all = await texts(ui)
       expect(has(all, /^ ⚠ APPROVAL ASKED  Bash  git push$/)).toBe(true)
-      expect(has(all, /^ ▶ WORKING  Bash  npm test$/)).toBe(view === 'v:timeline')
+      expect(has(all, /▶ WORKING/)).toBe(false)
     }
     await ui.press({ key: 'v:timeline' })
     const rows = await texts(ui)
