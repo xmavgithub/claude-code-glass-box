@@ -364,6 +364,10 @@ const THINKING_SEEN: Record<string, string> = {
     'No thinking came while the step streamed. Whether the model thought is read from the transcript when the next step or the turn ends; until then Glass Box cannot tell.',
 }
 
+/** A dot that pulses, for what is running, on the surfaces that draw SVG. */
+const PULSE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#e0a526"><animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite"/></circle></svg>'
+
 const TURN_OUTCOME: Record<string, { icon: string; color: string; label: string | null }> = {
   answer: { icon: '✓', color: 'success', label: null },
   aborted: { icon: '⊘', color: 'warning', label: 'interrupted' },
@@ -1460,7 +1464,13 @@ export const register: Register = on => {
   // text, its tokens and the details of its tool calls.
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Text, Button } = elements
+    // The remote surfaces draw SVG, and run its animation themselves: what is
+    // running pulses there at no cost to the session. The terminal keeps ●.
+    const Svg = e.surface !== 'terminal' && 'Svg' in elements && elements.Svg !== undefined ? elements.Svg : null
+    const pulse = (key: string) =>
+      Svg === null ? null : <Svg key={key} source={PULSE_SVG} alt="running" width={10} height={10} />
     const [turnList, stepList, callList, verdictList, toggledList, current, rewriteList, injectionList] =
       await Promise.all([
         read($, turns),
@@ -1665,9 +1675,10 @@ export const register: Register = on => {
           : tidy(call.summary)
 
       return (
-        <Box key={`call-${call.id}`} paddingLeft={indent} {...fit(indent)}>
+        <Box key={`call-${call.id}`} flexDirection="row" alignItems="center" paddingLeft={indent} {...fit(indent)}>
+          {call.status === 'running' && pulse(`pulse-call-${call.id}`)}
           {seg(room(indent + 2), [
-            { text: status.icon, color: status.color },
+            !(call.status === 'running' && Svg !== null) && { text: status.icon, color: status.color },
             { text: ` ${name}`, bold: true },
             server !== null && { text: ` ·${server}`, dim: true },
             showAgent && call.agentId !== null && { text: ' [subagent]', color: 'subtle' },
@@ -1745,9 +1756,10 @@ export const register: Register = on => {
       const model = serverModel(tool)
 
       return (
-        <Box key={`server-${tool.id}`} paddingLeft={indent} {...fit(indent)}>
+        <Box key={`server-${tool.id}`} flexDirection="row" alignItems="center" paddingLeft={indent} {...fit(indent)}>
+          {!done && pulse(`pulse-server-${tool.id}`)}
           {seg(room(indent + 2), [
-            { text: done ? '✓' : '●', color: done ? 'success' : 'warning' },
+            !(!done && Svg !== null) && { text: done ? '✓' : '●', color: done ? 'success' : 'warning' },
             { text: ` ${tool.name}`, bold: true },
             { text: `  ${formatDuration(tool.durationMs)}  ran by the model API`, dim: true },
             model !== null && { text: `  model ${model}` },
@@ -1856,9 +1868,10 @@ export const register: Register = on => {
         <Box key={`agent-${id}`} flexDirection="column" paddingLeft={2}>
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Box {...fit(2)}>
+            <Box flexDirection="row" alignItems="center" {...fit(2)}>
+              {running && pulse(`pulse-${key}`)}
               {seg(room(2), [
-                { text: icon, color },
+                !(running && Svg !== null) && { text: icon, color },
                 { text: ' Subagent', bold: true },
                 { text: ` ${spawn.type}` },
                 head !== '' && { text: ` · ${head}`, dim: true },
@@ -1932,9 +1945,10 @@ export const register: Register = on => {
         <Box key={`step-${step.key}`} flexDirection="column" paddingLeft={2} marginTop={1}>
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain dimColor label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Box {...fit(4)}>
+            <Box flexDirection="row" alignItems="center" {...fit(4)}>
+              {isRunning && pulse(`pulse-${key}`)}
               {seg(room(6), [
-                { text: icon, color },
+                !(isRunning && Svg !== null) && { text: icon, color },
                 { text: ` Step ${step.index + 1}`, bold: true },
                 { text: ` · ${model}${isRunning ? '' : `${formatDuration(step.durationMs)}${out} · `}${state}`, dim: true },
               ])}
@@ -2077,9 +2091,10 @@ export const register: Register = on => {
         <Box key={`turn-${turn.id}`} flexDirection="column" marginTop={1}>
           <Box flexDirection="row" gap={1}>
             <Button key={key} plain label={open ? '▾' : '▸'} onPress={toggle(key)} />
-            <Box {...fit(2)}>
+            <Box flexDirection="row" alignItems="center" {...fit(2)}>
+              {outcome === undefined && pulse(`pulse-${key}`)}
               {seg(room(2), [
-                { text: icon, color },
+                !(outcome === undefined && Svg !== null) && { text: icon, color },
                 { text: label, bold: true },
                 { text: ` · ${meta}`, dim: true },
               ])}
@@ -2586,7 +2601,7 @@ export const register: Register = on => {
           {term('g-t4', 'Context', 'how full the context window is and what fills it, the cost, the rate limits, the compactions.')}
 
           {section('Reading the timeline')}
-          {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied.')}
+          {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running is a dot that pulses.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}

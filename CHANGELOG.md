@@ -56,6 +56,11 @@ everything below is on `main`. 1.0 will be released when the criteria in
 
 #### What the Timeline shows
 
+- **A pulsing dot** marks what is running (turns, steps, subagents, tool
+  calls, server tools) in VS Code, the desktop app and mobile: an SVG
+  animation the surface runs itself, at no cost to the session. The terminal
+  keeps a still `●`.
+
 - **Steps**: model and effort (where they change), duration, tokens written,
   why the model stopped in words ("asked for 3 tools", "answered"), the first
   line of what it wrote; open, the full text and the token breakdown

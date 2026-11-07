@@ -672,7 +672,9 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
     expect(has(all, /^✓ Subagent Explore · haiku-5-5 · 1 step · 1 tool call · 3\.0s$/)).toBe(true)
     // Done, it folds away: its turn is not drawn, and is not a top-level turn.
     expect(all).not.toContain('“Find where the config is read.”')
-    expect(has(all, /^● Subagent · /)).toBe(true)
+    // Running: ● on the terminal, a pulsing dot (an SVG) elsewhere.
+    expect(has(all, /^(● | )Subagent · /)).toBe(true)
+    if (surface !== 'terminal') expect(await ui.find({ type: 'Svg' })).toBeDefined()
     // The agent's line sits right under the Agent call.
     const order = all.filter(t => /^. (Agent|Subagent Explore)\b/.test(t)).map(t => t.split(' ')[1])
     expect(order).toEqual(['Agent', 'Subagent'])
@@ -732,7 +734,7 @@ test('a subagent is drawn under the Agent call that started it, with its type, m
   })
   const last = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const task = await texts(last)
-  expect(has(task, /^● Background task ended · /)).toBe(true)
+  expect(has(task, /^(● | )Background task ended · /)).toBe(true)
   expect(has(task, /a background task ended \(Build finished\)/)).toBe(true)
   await last.unmount()
 })
@@ -828,7 +830,7 @@ test('each turn says where its message came from, what a hook changed, and what 
     // The blocked message is the newest row, open by default.
     expect(has(all0, /^⊘ Message · \d\d:\d\d · blocked$/)).toBe(true)
     expect(has(all0, /^This message did not enter, so no turn ran: it names a secret\. You sent it/)).toBe(true)
-    expect(has(all0, /^● Prompt from plugin reminder · /)).toBe(true)
+    expect(has(all0, /^(● | )Prompt from plugin reminder · /)).toBe(true)
     expect(all0).toContain('“hello”')
     expect(all0).toContain('✎ changed by a hook before the model read it')
 
@@ -967,7 +969,7 @@ test('slash commands and setting changes are rows of their own among the turns',
     expect(has(all, /^⚙ Setting theme · dark → light · \d\d:\d\d · by plugin styler · refused$/)).toBe(true)
     expect(all).toContain('A plugin refused the change: locked by policy')
     // Newest first: the settings, the command, then the turn.
-    const order = all.filter(t => /^(⚙ Setting|\/ \/|● Turn)/.test(t)).map(t => t.split(' ')[0])
+    const order = all.filter(t => /^(⚙ Setting|\/ \/|● Turn| Turn · )/.test(t)).map(t => (t.startsWith(' Turn') ? '●' : t.split(' ')[0]))
     expect(order).toEqual(['⚙', '⚙', '/', '●'])
 
     const key = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key ?? '').find(k => k.startsWith('c:'))
