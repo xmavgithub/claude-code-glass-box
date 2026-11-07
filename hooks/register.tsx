@@ -2713,7 +2713,7 @@ export const register: Register = on => {
           {section('Reading the timeline')}
           {term('g-s1', '● ✓ ✗ ⊘', 'running, done, failed, denied. In VS Code and the desktop app what is running moves: a pulsing dot, two dots taking turns for a subagent at work, three dots for a model thinking.')}
           {term('g-s16', '⚠ APPROVAL ASKED', 'Claude Code asked you to allow a tool call: shown at the top of every tab, in strong colors. Until you answer the call waits; Claude Code does not say when you answer, so the mark stays until the call ends.')}
-          {term('g-s17', 'WORKING', 'a tool is running now, on its row. An ask the permission mode settles without you (auto mode, say) shows as working.')}
+          {term('g-s17', 'WORKING  ●', 'a tool is running now: WORKING on its row, and on the Timeline a dot of the same color beside the counts. An ask the permission mode settles without you (auto mode, say) shows as working.')}
           {term('g-s2', '▸ ▾', 'open or close a turn or a step. An open step shows its full text, its tokens, and each tool call in full: input, output, and why it was allowed.')}
           {term('g-s3', '› text', 'what the model wrote in that step, before asking for tools or as its answer.')}
           {term('g-s5', '∴ text', 'the start of the model’s thinking in that step, when it sends any; open the step for all of it, or for what the transcript says when none came.')}
@@ -3269,18 +3269,34 @@ export const register: Register = on => {
     )
 
     // The session's counts, with Guide and Clear beside them rather than
-    // among the tabs.
+    // among the tabs. On the Timeline a dot, WORKING's color, follows them
+    // while a tool is at work: on a line always there, so nothing below it
+    // moves as calls come and go.
+    const counts = [
+      plural(allTurns.length, 'turn', 'turns'),
+      plural(stepList.length, 'step', 'steps'),
+      plural(callList.length, 'tool call', 'tool calls'),
+      `${failed} failed`,
+    ].join(' · ')
+    const atWork =
+      current === 'timeline'
+        ? callList.filter(c => c.status === 'running' && verdictKind(verdictById.get(c.id), c) !== 'awaiting')
+        : []
     const counters = (
       <Box flexDirection="row" gap={2}>
         <Box {...fit(19)}>
-          <Text dimColor wrap="truncate-end">
-            {[
-              plural(allTurns.length, 'turn', 'turns'),
-              plural(stepList.length, 'step', 'steps'),
-              plural(callList.length, 'tool call', 'tool calls'),
-              `${failed} failed`,
-            ].join(' · ')}
-          </Text>
+          {atWork.length === 0 ? (
+            <Text dimColor wrap="truncate-end">
+              {counts}
+            </Text>
+          ) : (
+            // On a narrow pane the counts give way, not the dot.
+            seg(room(19), [
+              { text: cut(counts, Math.max(1, room(19) - 3)), dim: true },
+              { text: '  ' },
+              { text: '●', color: 'suggestion', bold: true },
+            ])
+          )}
         </Box>
         {current === 'guide' ? (
           // Shown as the selected tab while the Guide is open; a press goes back.

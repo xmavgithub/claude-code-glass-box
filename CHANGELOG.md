@@ -62,7 +62,8 @@ everything below is on `main`. 1.0 will be released when the criteria in
 - **A call waiting for your approval, impossible to miss**: at the top of
   every tab, in reverse colors (`⚠ APPROVAL ASKED`), with the tool and its
   argument; its row is marked the same way, and a tool at work reads
-  `WORKING` on its row. An ask counts as yours only when Claude Code put it
+  `WORKING` on its row and, on the Timeline, a dot of the same color beside
+  the counts. An ask counts as yours only when Claude Code put it
   to you (`classic.PermissionRequest`); one the permission mode settles
   without you, as auto mode does, shows as working.
 - **Animations** for what is running, in VS Code, the desktop app and

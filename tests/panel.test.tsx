@@ -1016,7 +1016,7 @@ test('Stats shows what was sent to the operator’s telemetry collector, and say
 })
 
 
-test('an approval asked of you is loud on every tab, a tool at work on its row, and a thinking step says so while it runs', async ($, on) => {
+test('an approval asked of you is loud on every tab, a tool at work on its row and as a dot beside the counts, and a thinking step says so while it runs', async ($, on) => {
   let clock = 1_700_000_000_000
   on('clock.now', () => ({ value: (clock += 500) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -1056,12 +1056,13 @@ test('an approval asked of you is loud on every tab, a tool at work on its row, 
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    // The approval asked shows on every tab; a tool at work, on its row alone.
+    // The approval asked shows on every tab; a tool at work, beside the
+    // counts on the Timeline, on a line that is always there.
     for (const view of ['v:timeline', 'v:stats']) {
       await ui.press({ key: view })
       const all = await texts(ui)
       expect(has(all, /^ ⚠ APPROVAL ASKED  Bash  git push$/)).toBe(true)
-      expect(has(all, /▶ WORKING/)).toBe(false)
+      expect(has(all, /^\d+ turns? · .* failed {2}●$/)).toBe(view === 'v:timeline')
     }
     await ui.press({ key: 'v:timeline' })
     const rows = await texts(ui)
@@ -1070,6 +1071,10 @@ test('an approval asked of you is loud on every tab, a tool at work on its row, 
     if (surface !== 'terminal') expect(await ui.find({ type: 'Svg' })).toBeDefined()
     await ui.unmount()
   }
+  // On a narrow pane the counts give way, not the dot.
+  const narrow = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 40 } })
+  expect(has(await texts(narrow), /… {2}●$/)).toBe(true)
+  await narrow.unmount()
   release()
   await call
   finish()

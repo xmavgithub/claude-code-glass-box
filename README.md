@@ -40,7 +40,9 @@ under each of its tool calls, the call's input, output and permission verdict.
 A tool call whose approval Claude Code asked of you is shown at the top of
 every tab, in reverse colors (`⚠ APPROVAL ASKED`), since Claude waits for
 you; its row is marked the same way. A tool at work is marked `WORKING` on
-its row. An ask
+its row, and on the Timeline a dot of the same color follows the counts, on
+a line that is always there, so the timeline below does not move as calls
+come and go. An ask
 counts as yours only when Claude Code put it to you (it raised a
 `PermissionRequest`); one the permission mode settles without you, as auto
 mode's classifier does, shows as working. Claude Code says when it asks you,
